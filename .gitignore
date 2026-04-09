@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.class
+
+# C/C++ / Build artifacts
+*.ilk
+*.pdb
+*.exe
+*.dll
+*.lib
+*.exp
+
+# Specific local folders
+hip-release-temp/
+
+# Logs
+*.log
+
+# Temp / OS files
+.DS_Store
+Thumbs.db
+
+# Visual Studio / VS Code
+.vscode/
+.vs/
+
+runtime-*/
+llama.cpp/
+*.zip
+*.original
+*.patched
+$logPath
