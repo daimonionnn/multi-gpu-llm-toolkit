@@ -4,12 +4,11 @@
 
 Dual-backend llama.cpp server using **CUDA** (NVIDIA RTX 5090) and **ROCm/HIP** (AMD Radeon 8060S iGPU) simultaneously, with Open WebUI as a web frontend. Also supports **Vulkan** as an alternative backend that can drive both GPUs without ROCm/HIP.
 
-## Releases
+## Project snapshot
 
-### Version 0.1 (Initial Release)
-- Initial release supporting dual-backend testing for AMD + NVIDIA on Windows.
+- Supports dual-backend testing for AMD + NVIDIA on Windows.
 - Features `rocm-cuda`, `vulkan`, and `vulkan-cuda` backend modes.
-- Includes memory diagnostic scripts and patching utilities for ROCm (anyway probably not needed)
+- Includes memory diagnostic scripts and patching utilities for ROCm.
 
 ## Hardware
 
@@ -41,6 +40,8 @@ Dual-backend llama.cpp server using **CUDA** (NVIDIA RTX 5090) and **ROCm/HIP** 
 
 For a dual-GPU system based on an AMD Strix Halo (e.g., AMD Strix Halo 395) combined with an NVIDIA dedicated GPU (e.g., RTX 5090 32GB), base your backend Mode and BIOS settings on the total memory footprint of the model and context:
 
+As of 2026-05-29, this machine has also successfully loaded and served requests with **`rocm-cuda` at 96 GB UMA** using the patched HIP runtime and current CUDA/ROCm stack. Treat that as a verified observation for this setup, not a universal guarantee. **64 GB UMA** remains the conservative recommendation for ROCm on Windows until more benchmark and stability data is collected.
+
 **Example for AMD Strix Halo + RTX 5090 32GB**
 
 * **Model + Context < 126-128GB**
@@ -49,7 +50,7 @@ For a dual-GPU system based on an AMD Strix Halo (e.g., AMD Strix Halo 395) comb
 
 
 * **Model + Context > 126-128GB (Up to 160GB)**
-  If you are running exceptionally large models or huge context windows that exceed 96GB (on AMD Strix Halo), the ROCm mode may crash or swap to disk since AMD's ROCm on Windows tops out at ~64GB contiguous UMA allocation. In this case, choose either **`vulkan-cuda`** or **`vulkan-vulkan`**. Vulkan circumvents ROCm limitations and can map memory more aggressively across the system.
+    If you are running exceptionally large models or huge context windows that exceed 96GB (on AMD Strix Halo), **`vulkan-cuda`** or **`vulkan-vulkan`** are still the safer choices. Historically, ROCm on Windows topped out near ~64GB contiguous UMA allocation and also showed poor 96 GB UMA behavior on this hardware. Current testing shows that **`rocm-cuda` can now start and serve requests at 96 GB UMA on this machine**, but that path should still be benchmarked and monitored for long-run stability before treating it as the default recommendation. Vulkan still circumvents the older ROCm limitations more reliably.
   * **BIOS Setting:** Set UMA GPU size to **96GB**.
 
 

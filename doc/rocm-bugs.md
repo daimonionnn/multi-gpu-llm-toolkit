@@ -3,7 +3,7 @@
 > **Note:** The long and chaotic story documented below is specifically regarding the **ROCm driver** and its bugs on Windows.
 > 
 > **Key Takeaway for Backends & BIOS UMA:**
-> - **ROCm-CUDA** is the fastest backend, but it currently has memory allocation bugs. To use it, you **must set UMA to 64GB in BIOS** (96GB UMA is very buggy or impossible to use properly with ROCm).
+> - **ROCm-CUDA** is the fastest backend, but the safest documented setting is still **64GB UMA in BIOS**. Historically, **96GB UMA** was very buggy or unusable with ROCm on this machine. As of **2026-05-29**, `rocm-cuda` has also been observed to load a large model and serve requests successfully at **96GB UMA** on the current stack, so the old guidance should now be treated as a conservative baseline rather than an absolute rule.
 > - **Vulkan and Vulkan-CUDA** backends **do not** have these bugs. For these backends, you **can safely set UMA to 96GB in BIOS**.
 >
 > *(Note: Test results have been temporarily removed and will be retested and included later.)*
@@ -20,7 +20,7 @@ There are **two independent bugs** that affect HIP memory on Strix Halo. They ha
 
 ## Bug 2: KV cache spill to shared memory (ROCm + Windows WDDM)
 
-**What it does**: At 96 GB UMA (leaving only 32 GB for Windows), ROCm places the KV cache in slow shared system memory instead of dedicated VRAM — even when VRAM has plenty of space. This causes generation speed to drop dramatically (e.g. 23 tok/s → 9 tok/s). It affects even small 40 GiB models.
+**What it does**: In prior testing at 96 GB UMA (leaving only 32 GB for Windows), ROCm placed the KV cache in slow shared system memory instead of dedicated VRAM — even when VRAM had space available. That caused generation speed to drop dramatically (for example, 23 tok/s -> 9 tok/s) and affected even small 40 GiB models. Current behavior may be improved on newer drivers/runtime, so this should be treated as a known historical failure mode that still needs benchmarking rather than a guaranteed outcome on every current setup.
 
 **What it does NOT do**: Allocations still *succeed* — the data just lands in the wrong (slow) memory pool.
 
@@ -32,22 +32,22 @@ There are **two independent bugs** that affect HIP memory on Strix Halo. They ha
 1. **ROCm/HIP side**: With 96 GB UMA and only 32 GB left for Windows, GART and paging subsystems are starved, causing ROCm to fall back to shared memory paths.
 2. **llama.cpp side**: The UMA detection in `ggml-cuda.cu` checks `prop.integrated > 0` (true for AMD APUs) and overrides `hipMemGetInfo()` with `/proc/meminfo` on Linux, underreporting available memory. A [fix PR #20472](https://github.com/ggml-org/llama.cpp/pull/20472) guards this with `!defined(GGML_USE_HIP)`. On Windows, this code path doesn't run — the bug is purely on the ROCm driver side.
 
-**Fix**: No user-side fix on Windows. The bug is in the WDDM/ROCm driver interaction. Workaround: reduce BIOS UMA to 64 GB. On Linux, TTM kernel parameters can work around this — see [Linux workarounds](#workarounds-for-linux-users).
+**Fix**: No clear user-side fix is confirmed on Windows. The bug appears rooted in WDDM/ROCm driver interaction. The conservative workaround remains reducing BIOS UMA to 64 GB. On Linux, TTM kernel parameters can work around this — see [Linux workarounds](#workarounds-for-linux-users).
 
 ## How the two bugs interact
 
 | Bug | Affects | Trigger | Fix |
 |-----|---------|---------|-----|
 | **Bug 1** (isLargeBar) | Max allocation size | Always on (unpatched driver) | Binary patch `amdhip64_7.dll` |
-| **Bug 2** (KV spill) | Memory placement speed | 96 GB UMA + low OS RAM | Reduce BIOS UMA to 64 GB |
+| **Bug 2** (KV spill) | Memory placement speed | Historically: 96 GB UMA + low OS RAM | Reduce BIOS UMA to 64 GB |
 
-At 96 GB UMA, both bugs compound: Bug 1 caps allocations at ~64 GiB (fixable with patch), but even after fixing Bug 1, Bug 2 still sends KV cache to shared memory (slow). At 64 GB UMA, Bug 1 is irrelevant (VRAM = 64 GiB = GART cap) and Bug 2 doesn't trigger (OS has 64 GB headroom).
+Historically, at 96 GB UMA, both bugs compounded: Bug 1 capped allocations at ~64 GiB (fixable with patch), but even after fixing Bug 1, Bug 2 still sent KV cache to shared memory (slow). On the current stack, 96 GB UMA is no longer an automatic startup failure on this machine, but 64 GB UMA remains the safer baseline until the performance characteristics are re-benchmarked.
 
 ---
 
 ## Scenarios: 64 GB vs 96 GB UMA on 128 GB Strix Halo
 
-### Scenario 1: 64 GB GPU + 64 GB OS RAM (recommended, current)
+### Scenario 1: 64 GB GPU + 64 GB OS RAM (recommended baseline)
 
 ```
 128 GB total RAM
@@ -70,7 +70,7 @@ At 96 GB UMA, both bugs compound: Bug 1 caps allocations at ~64 GiB (fixable wit
 
 **Status**: ✅ Working. All benchmarks were collected with this configuration.
 
-### Scenario 2: 96 GB GPU + 32 GB OS RAM (broken, more VRAM)
+### Scenario 2: 96 GB GPU + 32 GB OS RAM (retest in progress)
 
 ```
 128 GB total RAM
@@ -85,18 +85,18 @@ At 96 GB UMA, both bugs compound: Bug 1 caps allocations at ~64 GiB (fixable wit
 | Combined GPU ceiling | ~128 GiB (theoretical) |
 | Windows RAM | 32 GiB (barely enough) |
 | isLargeBar patch needed? | **Yes** — without it, `hipMalloc` caps at ~64 GiB despite 96 GiB VRAM |
-| KV cache placement | ❌ Spills to shared memory (slow) |
-| KV cache spill bug? | **Yes** — OS RAM too low, GART starved |
-| Max model (AMD only) | ~84 GiB (with patch) but KV cache is slow |
-| Max model (dual GPU) | ~98 GiB (theoretical) but KV spill kills performance |
-| Generation speed | ~60% slower than Scenario 1 on same model |
-| System stability | Freezes possible under memory pressure |
+| KV cache placement | Historically spilled to shared memory; current stack needs re-benchmarking |
+| KV cache spill bug? | Previously reproducible; current severity unconfirmed |
+| Max model (AMD only) | Higher than 64 GB UMA in theory, but still needs practical validation |
+| Max model (dual GPU) | Higher than 64 GB UMA in theory, but still needs practical validation |
+| Generation speed | Previously ~60% slower than Scenario 1 on the same model; re-test pending |
+| System stability | Startup now works on the current setup; long-run stability still needs validation |
 
-**Status**: ❌ Broken. Even small models (~40 GiB) exhibit KV cache spill. The extra 32 GiB of VRAM is unusable in practice because all data landing there performs at shared memory speeds.
+**Status**: Mixed. Older testing showed clear regression, but as of 2026-05-29 the current machine has successfully loaded a large model in `rocm-cuda`, allocated KV buffers, and served requests at 96 GB UMA. Treat this scenario as promising but not yet fully revalidated.
 
-### Why Scenario 2 is worse despite more VRAM
+### Why Scenario 2 was worse in prior testing despite more VRAM
 
-The paradox: 96 GB UMA gives 50% more VRAM but delivers ~60% *worse* generation performance. The reason is that Windows needs sufficient OS RAM for:
+The historical paradox was that 96 GB UMA gave 50% more VRAM but delivered ~60% *worse* generation performance. The reason is that Windows needs sufficient OS RAM for:
 - GART (Graphics Address Remapping Table) management
 - Page file backing for virtual memory
 - Desktop Window Manager, drivers, and background processes
