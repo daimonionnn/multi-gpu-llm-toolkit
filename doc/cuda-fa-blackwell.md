@@ -5,7 +5,8 @@ its token-generation throughput the moment the KV cache reaches 8192 tokens. The
 Vulkan backend on the *same* GPU is unaffected.
 
 Root cause identified, mechanism confirmed by measurement, and a one-line local
-fix verified. Not found in upstream issues as of 2026-08-09.
+fix verified and shipped in this repo. Not found in upstream issues as of
+2026-08-09; deliberately kept local rather than reported.
 
 ## Symptom
 
@@ -119,17 +120,20 @@ The cliff disappears completely; the curve becomes as flat as Vulkan's.
 
 ### Applying it
 
-The patch is **not** applied by `setup-llama.sh`, so that `git pull --ff-only`
-keeps working on a clean tree. To use it:
+`setup-llama.sh` applies everything in `linux/patches/` when given `--patches`:
 
 ```bash
-cd linux/llama.cpp
-git apply ../patches/0001-cuda-fa-exempt-blackwell-from-ada-mma-heuristic.patch
-cd .. && ./scripts/setup-llama.sh --backend rocm-cuda
+./scripts/setup-llama.sh --backend rocm-cuda --patches
 ```
 
-A prebuilt patched runtime from this investigation is kept at
-`linux/runtime-cuda-fapatch/` (gitignored) so the two can be compared directly.
+Without the flag the build is stock upstream, so both behaviours stay available.
+Updates are handled too: the script reverses its own patches before
+`git pull --ff-only` and re-applies them afterwards, so a patched checkout does
+not block updating. If upstream moves the code and a patch stops applying, the
+script warns and continues with stock behaviour rather than failing the build.
+
+A prebuilt patched runtime from the investigation is also kept at
+`linux/runtime-cuda-fapatch/` (gitignored) for side-by-side comparison.
 
 ## Scope
 
@@ -151,7 +155,14 @@ this bug:
 - [#24485](https://github.com/ggml-org/llama.cpp/issues/24485) — silent CPU fallback for quantized KV without `GGML_CUDA_FA_ALL_QUANTS`
 
 A search of llama.cpp issues and discussions on 2026-08-09 found no existing
-report of this performance cliff. It looks reportable upstream.
+report of this performance cliff.
+
+It has not been reported. Worth knowing if anyone revisits that decision: the
+fix here exempts all of Blackwell, which is blunt. sm_100 (datacenter Blackwell)
+has more shared memory and async tensor-core overlap, so the MMA path may well
+be the right choice there; a narrower condition would need hardware to verify.
+llama.cpp also asks contributors to open an issue for discussion before sending
+a patch, and forbids AI-written issue text, PR descriptions and review replies.
 
 ## Separate bug found alongside
 

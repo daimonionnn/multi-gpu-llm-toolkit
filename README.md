@@ -82,8 +82,7 @@ These apply across platforms and are the reason both live in one repo:
 - [x] Linux: all four backends build; `rocm-cuda` runs ROCm and CUDA in one process
 - [x] Linux: benchmark matrix across all seven single/dual configurations
 - [x] Linux: context-depth sweep — found the CUDA backend collapses past ~8k while Vulkan does not
-- [x] Linux: root-caused that collapse to an Ada-tuned FA heuristic applied to Blackwell; local patch restores 2–5×
-- [ ] Report the Blackwell FA heuristic upstream to llama.cpp
+- [x] Linux: root-caused that collapse to an Ada-tuned FA heuristic applied to Blackwell; `--patches` restores 2-5x
 - [ ] Linux: benchmark a model too large for one card — the case dual-GPU exists for
 - [ ] Linux: tune `--tensor-split` (everything so far uses the proportional default)
 - [ ] Linux: tune `--tensor-split` for the 3:1 VRAM asymmetry

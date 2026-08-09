@@ -3,7 +3,12 @@
 # Linux port of setup-llama.ps1.
 #
 # Usage:
-#   ./setup-llama.sh [--backend rocm-cuda|vulkan|vulkan-cuda] [--repo DIR] [--out DIR] [--clean]
+#   ./setup-llama.sh [--backend rocm|rocm-cuda|vulkan|vulkan-cuda] [--repo DIR]
+#                    [--out DIR] [--clean] [--patches]
+#
+# --patches applies everything in linux/patches/ to the llama.cpp checkout
+# before building. Without it the build is stock upstream. See
+# doc/cuda-fa-blackwell.md for what the shipped patch does and why.
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
@@ -11,6 +16,7 @@ BACKEND="rocm-cuda"
 REPO_DIR="$LINUX_ROOT/llama.cpp"
 OUTPUT_DIR=""
 CLEAN=0
+APPLY_PATCHES=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -18,6 +24,7 @@ while [[ $# -gt 0 ]]; do
         --repo)    REPO_DIR="${2:?}"; shift 2 ;;
         --out)     OUTPUT_DIR="${2:?}"; shift 2 ;;
         --clean)   CLEAN=1; shift ;;
+        --patches) APPLY_PATCHES=1; shift ;;
         -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
         *) die "Unknown argument: $1" ;;
     esac
@@ -118,12 +125,54 @@ case "$BACKEND" in
 esac
 
 # ── Source ─────────────────────────────────────────────────────────────
+PATCH_DIR="$LINUX_ROOT/patches"
+
+# Reverse only the patches we know about, so `git pull --ff-only` sees a clean
+# tree. Any other local edit in llama.cpp is left alone (and will still block
+# the pull, which is the correct outcome).
+unapply_patches() {
+    local p
+    [[ -d "$PATCH_DIR" ]] || return 0
+    for p in "$PATCH_DIR"/*.patch; do
+        [[ -e "$p" ]] || continue
+        if git -C "$REPO_DIR" apply -R --check "$p" 2>/dev/null; then
+            git -C "$REPO_DIR" apply -R "$p"
+            info "Reverted $(basename "$p") before update"
+        fi
+    done
+}
+
+apply_patches() {
+    local p rc=0
+    [[ -d "$PATCH_DIR" ]] || { warn "No patches/ directory"; return 0; }
+    for p in "$PATCH_DIR"/*.patch; do
+        [[ -e "$p" ]] || { warn "No patches found in $PATCH_DIR"; return 0; }
+        if git -C "$REPO_DIR" apply --check "$p" 2>/dev/null; then
+            git -C "$REPO_DIR" apply "$p"
+            ok "Applied $(basename "$p")"
+        elif git -C "$REPO_DIR" apply -R --check "$p" 2>/dev/null; then
+            info "Already applied: $(basename "$p")"
+        else
+            warn "Does NOT apply to this llama.cpp revision: $(basename "$p")"
+            rc=1
+        fi
+    done
+    (( rc == 0 )) || warn "Some patches were skipped - the build will use stock upstream behaviour."
+}
+
 if [[ ! -d "$REPO_DIR" ]]; then
     info "Cloning llama.cpp into $REPO_DIR ..."
     git clone https://github.com/ggml-org/llama.cpp "$REPO_DIR"
 else
     info "Updating $REPO_DIR ..."
+    unapply_patches
     git -C "$REPO_DIR" pull --ff-only
+fi
+
+# No forced clean here: ninja rebuilds the touched translation unit on its own,
+# which is seconds rather than a full backend rebuild.
+if (( APPLY_PATCHES )); then
+    apply_patches
 fi
 
 BUILD_DIR="$REPO_DIR/build-$BACKEND"
