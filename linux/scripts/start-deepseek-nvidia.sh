@@ -4,7 +4,7 @@
 # Only quants small enough to fit 96.6 GB usable VRAM alongside the MLA KV
 # cache qualify (sizes from unsloth/DeepSeek-V4-Flash-0731-GGUF):
 #
-#   IQ2_XXS  84.6 GB  fits with 128k context  <- default (best quality that fits)
+#   IQ2_M    85 GB    fits with 128k context  <- default (76 tg / 2118 pp measured)
 #   IQ1_M    80.9 GB  fits with 200k context  <- --200k
 #
 # IQ quants are fine here: the HIP IQ-kernel fault is AMD-only and this profile
@@ -63,7 +63,7 @@ case "${1:-}" in
         MODEL_ARGS=(-c 262144 --n-cpu-moe 10)
         ;;
     *)
-        MODEL=$(require_model "$MODEL_IQ2" UD-IQ2_XXS) || exit 1
+        MODEL=$(require_model "$MODEL_IQ2" UD-IQ2_M) || exit 1
         MODEL_ARGS=(-c 131072)
         ;;
 esac

@@ -294,6 +294,24 @@ Each dual gauntlet pushes 165k+ tokens of prefill work through the AMD expert
 path (4k + 16k bench plus two 65k probes with a full-cache clear between
 them). MXFP4, Q8_K_XL and Q4_K_XL all survived it without a fault — roughly
 half a million tokens of AMD expert work across three non-IQ quants — while
+> **Production correction (2026-08-09, evening).** The i-quant isolation below
+> did not hold. Serving a real agent workload, the **MXFP4** dual faulted with
+> the same `HSA_STATUS_ERROR_MEMORY_FAULT` at ~45k prefill tokens — hours
+> after passing its gauntlet. The bug is **probabilistic on the AMD expert
+> path for all quants**, IQ quants merely failing fastest; a 165k-token
+> gauntlet cannot certify a low-rate fault. Unattended/fallback duty must run
+> CUDA-only (`start-deepseek-mxfp4-cuda-only.sh`).
+>
+> **Scope narrowed (2026-08-10): it is deepseek4-specific.** gpt-oss-120b
+> (`gpt-oss` arch, 128 experts, native MXFP4) ran the experts of 17 of its 36
+> layers on the AMD card and pushed **1,008,000 prefill tokens** through that
+> path — 8 × 126k probes with full-cache clears — at a rock-steady 2060 pp /
+> 85 tg, zero faults. That is 4x more AMD expert work than DeepSeek ever
+> survived, so the fault lives in the `deepseek4` compute path (days old in
+> llama.cpp), not in MoE-on-RDNA4 generally. **Dual layouts are back on the
+> table for non-DeepSeek MoE** (Step-3.7-Flash class); DeepSeek stays off the
+> AMD card until upstream fixes land.
+
 IQ3_XXS faulted at 43k in one run. That isolates the ROCm fault to the **HIP i-quant
 (IQ-series) MoE kernels** on gfx1201 — MXFP4 and k-quant expert paths are
 stable, and the expert-offload dual layout is safe (and clearly better than
@@ -366,3 +384,35 @@ The capacity cost shows up exactly once per model load: with 122 GiB the
 load pays NVMe page-in for the CPU-hosted experts (4k pp read 254 vs 480
 before — a cold-start artifact, not a regression; 16k+ numbers above are the
 steady state).
+
+### DeepSeek all-VRAM 2-bit quants — the single-card speed class
+
+Two ~2-bit quants small enough to fit the NVIDIA card entirely (no RAM
+offload, no AMD), `-c 131072`, measured 2026-08-10:
+
+| Quant | Size | pp 4k/16k/65k | tg 4k/16k/65k |
+|---|---:|---|---|
+| unsloth UD-IQ2_M | 85 GB | 2118 / 2106 / 1620 | **76.1 / 75.1 / 65.2** |
+| antirez IQ2XXS+Q8-attn (imatrix) | 80.8 GB | 2007 / 2040 / 1557 | 74.5 / 73.4 / 63.9 |
+
+2.5x the generation of the previous best DeepSeek config (IQ3+ncmoe8:
+29.3 tg) — eliminating the last RAM-hosted expert layers is worth far more
+than the raw bandwidth math suggests. Speed is a tie within noise; quality
+between them is untested (antirez spends bits on Q8 attention/shared/output,
+IQ2_M on bigger experts), and the antirez file also fits ~200k context. Both
+being ~2-bit re-encodes of a QAT model, quality sits below IQ3_XXS — these
+are the speed picks, MXFP4 remains the quality pick.
+
+### gpt-oss-120b — the fastest model on this rig
+
+Native-MXFP4 MoE (60 GB, 128 experts / 4 active), fits the NVIDIA card whole:
+
+| Config | pp | tg |
+|---|---|---|
+| CUDA-only, 4k / 16k | 9950 / 9448 | **258 / 242** |
+| CUDA-only, 126k prompt | 4655 | 148.8 |
+| dual, 17 expert layers on AMD | ~2060 | ~85 |
+
+The dual row is the stability experiment above, not a recommendation — with
+the model fitting one card, adding the AMD card costs 3x. CUDA-only gpt-oss
+is the speed king of this machine by a wide margin.
