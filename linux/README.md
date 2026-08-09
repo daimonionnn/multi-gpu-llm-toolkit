@@ -182,6 +182,17 @@ For the other backends prebuilt binaries do exist and are equivalent to ours:
 upstream's `llama-b10331-bin-ubuntu-vulkan-x64` matches this repo's Vulkan build
 within 1-2% on both GPUs, and there is a `ubuntu-rocm-7.2-x64` asset too.
 
+**Prebuilt binaries cannot give you dual-vendor.** LM Studio ships an unaffected
+CUDA build and a ROCm build at the same commit (`fe2adf0`), but neither exports
+`ggml_backend_init`: they are not built with `GGML_BACKEND_DL`, so each bundle is
+a closed single-vendor build and the two `.so` files cannot be loaded into one
+process. Verified - combining them yields `failed to find ggml_backend_init`.
+Upstream's own release assets are likewise one backend per archive.
+
+So a single process driving both an AMD and an NVIDIA GPU has to be built
+locally, which is what this repo does, and on Blackwell that means living with
+the CUDA toolkit issue above or using Vulkan for the NVIDIA side.
+
 Still unmeasured: a model too large for one card, `--tensor-split` tuning,
 depths beyond 32k, quantized KV cache, and concurrent load
 (`benchmark-loaded-model.sh` has only been exercised against a mock server).
