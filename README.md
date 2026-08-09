@@ -54,7 +54,7 @@ These apply across platforms and are the reason both live in one repo:
 - **[doc/systems.md](doc/systems.md)** — the test rigs, in detail
 - **[doc/benchmarks.md](doc/benchmarks.md)** — results, keyed by rig and backend, plus what the metrics actually mean
 - **[doc/rocm-bugs.md](doc/rocm-bugs.md)** — ROCm/HIP memory bugs, with a per-bug matrix of which hardware and OS each one affects
-- **[doc/cuda-glibc-243.md](doc/cuda-glibc-243.md)** — why CUDA 13.1 cannot build on Ubuntu 26.04, and what to do instead
+- **[doc/cuda-glibc-243.md](doc/cuda-glibc-243.md)** — why the distro CUDA 13.1 cannot build on Ubuntu 26.04, and how to fix it
 
 ## Repository layout
 
@@ -78,8 +78,8 @@ These apply across platforms and are the reason both live in one repo:
 - [x] Linux: build and launch scripts ported to bash, detection and error paths verified on the rig
 - [x] Linux: confirmed ROCm supports the R9700 natively as `gfx1201` — no `HSA_OVERRIDE_GFX_VERSION` needed
 - [x] Linux: confirmed the APU/UMA bugs cannot occur on discrete cards (matrix in `doc/rocm-bugs.md`)
-- [x] Linux: `rocm` and `vulkan` backends build and enumerate both GPUs
-- [ ] Linux: install CUDA 13.2+ from NVIDIA's repo to unblock `rocm-cuda` / `vulkan-cuda`
+- [x] Linux: all four backends build; `rocm-cuda` runs ROCm and CUDA in one process
+- [ ] Linux: load a model — nothing has been benchmarked yet
 - [ ] Linux: tune `--tensor-split` for the 3:1 VRAM asymmetry
 - [ ] Benchmarks for each rig
 - [ ] Stand up the `halo-linux` rig for a real same-hardware OS comparison

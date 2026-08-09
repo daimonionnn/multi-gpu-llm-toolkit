@@ -5,11 +5,9 @@ an AMD Radeon AI PRO R9700 (32 GB, RDNA 4, gfx1201) alongside an NVIDIA
 RTX PRO 6000 Blackwell (96 GB, sm_120) on Ubuntu 26.04.
 
 > **Status:** all scripts ported from the [Windows implementation](../windows/README.md)
-> and exercised on the real machine. Prerequisites are installed and the
-> `vulkan` and `rocm` backends build and enumerate both GPUs. The two
-> CUDA-based backends cannot be built here at all — see
-> [CUDA blocker](#known-blocker-cuda-cannot-be-built-on-this-rig). Nothing is
-> benchmarked yet.
+> and exercised on the real machine. **All four backends build**, and
+> `rocm-cuda` enumerates ROCm and CUDA together in a single process. Nothing is
+> benchmarked yet — no model has been loaded.
 
 ## Quick start
 
@@ -17,12 +15,12 @@ RTX PRO 6000 Blackwell (96 GB, sm_120) on Ubuntu 26.04.
 cd linux/scripts
 ./install-prereqs.sh --backend all   # apt packages (does not touch GPU drivers)
 ./list-devices.sh                    # what the system exposes
-./setup-llama.sh --backend vulkan    # build into ../runtime-vulkan/
-./start-llama-server.sh --mode vulkan-vulkan -- -m /path/model.gguf -c 8192 -ngl 99
+./setup-llama.sh --backend rocm-cuda # build into ../runtime-rocm-cuda/
+./start-llama-server.sh --mode rocm-cuda -- -m /path/model.gguf -c 8192 -ngl 99
 ```
 
-`vulkan-vulkan` is the recommended dual-GPU mode on this rig; `rocm-cuda` is
-currently unbuildable here.
+`rocm-cuda` needs a CUDA Toolkit newer than the one Ubuntu 26.04 ships — see
+[CUDA on Ubuntu 26.04](#cuda-on-ubuntu-2604) below.
 
 Everything after `--` goes to `llama-server` untouched — the equivalent of
 `-ExtraArgs` in the PowerShell scripts.
@@ -47,12 +45,12 @@ version has no equivalent for: on Windows every HIP build is bundled with CUDA,
 which leaves no way to use the AMD card when the CUDA toolchain is unusable.
 That is exactly the situation on this rig.
 
-| Backend       | Libraries                               | Device names       | Builds here       |
-|---------------|-----------------------------------------|--------------------|-------------------|
-| `rocm`        | `libggml-hip.so`                        | `ROCm0`            | Yes               |
-| `vulkan`      | `libggml-vulkan.so`                     | `Vulkan*`          | Yes               |
-| `rocm-cuda`   | `libggml-hip.so` + `libggml-cuda.so`    | `ROCm0`, `CUDA0`   | No — CUDA blocker |
-| `vulkan-cuda` | `libggml-vulkan.so` + `libggml-cuda.so` | `Vulkan*`, `CUDA0` | No — CUDA blocker |
+| Backend       | Libraries                               | Device names       | Builds here |
+|---------------|-----------------------------------------|--------------------|-------------|
+| `rocm`        | `libggml-hip.so`                        | `ROCm0`            | Yes         |
+| `vulkan`      | `libggml-vulkan.so`                     | `Vulkan*`          | Yes         |
+| `rocm-cuda`   | `libggml-hip.so` + `libggml-cuda.so`    | `ROCm0`, `CUDA0`   | Yes         |
+| `vulkan-cuda` | `libggml-vulkan.so` + `libggml-cuda.so` | `Vulkan*`, `CUDA0` | Yes         |
 
 Launch modes are unchanged: `rocm`, `cuda`, `vulkan`, `rocm-cuda`,
 `vulkan-vulkan`, `vulkan-cuda`. `vulkan-vulkan` uses the `vulkan` runtime, so
@@ -113,29 +111,31 @@ required CUDA version depends on the card, and distro packages are routinely too
 old for a current-generation GPU — as they are on this rig. Install a toolkit
 from NVIDIA if `install-prereqs.sh` warns that none supports your `sm_` target.
 
-## Known blocker: CUDA cannot be built on this rig
+## CUDA on Ubuntu 26.04
 
-CUDA 13.1 — the newest in Ubuntu 26.04's repos, and the only one that targets
-`sm_120` — cannot compile against glibc 2.43. Conflicting `rsqrt`/`rsqrtf`
-declarations kill every CUDA compilation, down to an empty kernel. Full analysis
-and the rejected workarounds: **[../doc/cuda-glibc-243.md](../doc/cuda-glibc-243.md)**.
+The distro's CUDA 13.1 — the newest in Ubuntu's own repos, and the only one
+there that targets `sm_120` — **cannot compile against glibc 2.43**. Conflicting
+`rsqrt`/`rsqrtf` declarations kill every CUDA compilation, down to an empty
+kernel, so `rocm-cuda` and `vulkan-cuda` will not build with it.
 
-Consequence: `rocm-cuda` and `vulkan-cuda` are unbuildable here until a CUDA
-13.2+ toolkit is installed from NVIDIA's apt repository. `setup-llama.sh` will
-pick a newer toolkit up automatically once one exists under `/usr/local/cuda-*`.
+The fix is CUDA 13.3 from NVIDIA's apt repository, which is what this rig now
+uses. Full analysis, the install commands, and four workarounds that do *not*
+work: **[../doc/cuda-glibc-243.md](../doc/cuda-glibc-243.md)**.
 
-Until then **`vulkan-vulkan` is the working dual-GPU path** — one backend
-driving both cards, which is the same fallback role Vulkan plays on `halo-win`
-when ROCm misbehaves, reached from the opposite direction.
+`setup-llama.sh` finds the newest toolkit supporting the GPU on its own, so no
+`PATH` changes are needed after installing it.
 
 ## What has actually been verified
 
 Built and run on the real machine:
 
-- **`vulkan` backend builds**, and llama.cpp enumerates all three usable Vulkan
-  devices.
-- **`rocm` backend builds**, and reports `ROCm0: AMD Radeon AI PRO R9700
-  (32624 MiB)`.
+- **All four backends build** — `rocm`, `vulkan`, `rocm-cuda`, `vulkan-cuda`.
+- **Both vendors initialise in one process.** The `rocm-cuda` runtime reports
+  `CUDA0: NVIDIA RTX PRO 6000` and `ROCm0: AMD Radeon AI PRO R9700` together,
+  which is the whole point of the project and had not been shown on Linux
+  before.
+- **`vulkan` enumerates** all three usable Vulkan devices; **`rocm`** reports
+  `ROCm0: AMD Radeon AI PRO R9700 (32624 MiB)`.
 - **Device selection against the real device list.** llama.cpp orders them
   `Vulkan0` = Intel iGPU, `Vulkan1` = NVIDIA, `Vulkan2` = AMD — so index-based
   selection really would have picked the iGPU. `vulkan-vulkan` correctly
@@ -152,5 +152,12 @@ each backend), `ROCM_PATH` was being exported as `/usr` on the distro layout
 (which makes clang look for device bitcode in `/usr/amdgcn/bitcode` and fail the
 compiler check), and `spirv-headers` was missing from the prerequisites.
 
-Still unverified: any CUDA-based backend, and therefore every number in
-[../doc/benchmarks.md](../doc/benchmarks.md) — nothing has been benchmarked.
+Still unverified: **no model has ever been loaded.** Every result above is
+build- and enumeration-level. Nothing in
+[../doc/benchmarks.md](../doc/benchmarks.md) has been measured, `--tensor-split`
+is untuned, and the backends have not been run under memory pressure.
+
+One anomaly to watch when the first model is loaded: in the `rocm-cuda` runtime,
+CUDA0 reports **more free memory than it has in total** (97249 MiB total,
+199755 MiB free). llama.cpp sizes `--fit` decisions from free VRAM, so this
+could plausibly lead it to over-commit the NVIDIA card. Unexplained so far.

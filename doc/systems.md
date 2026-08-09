@@ -48,7 +48,7 @@ bugs. Details in [rocm-bugs.md](rocm-bugs.md).
 | GPU 2     | NVIDIA RTX PRO 6000 Blackwell Workstation Edition — 95.6 GiB, compute 12.0, PCIe 5.0 x16 |
 | OS        | Ubuntu 26.04 LTS, kernel 7.0.0-29-generic |
 | AMD stack | ROCm 7.1 (distro packages — `libamdhip64-7` 7.1.0, `rocminfo`/`rocm-smi` 7.1.1) |
-| NVIDIA    | Driver 595.84, CUDA Toolkit 13.1 at `/usr/local/cuda-13.1` |
+| NVIDIA    | Driver 595.84, CUDA Toolkit 13.3 at `/usr/local/cuda-13.3` (NVIDIA repo) |
 | Vulkan    | RADV (AMD), NVIDIA ICD, plus Intel ARL iGPU and llvmpipe |
 
 Both cards are discrete, so there is no UMA setting and no BIOS memory split.
@@ -85,14 +85,15 @@ of it is real VRAM rather than carved-out system RAM.
 - **`--tensor-split` ratio.** 96 GB vs 32 GB is roughly 3:1, so an even split
   wastes most of the NVIDIA card. Starting point is `1,3` (AMD first — that is
   the order the launcher builds `--device` in), to be tuned per model.
-- **CUDA is unusable on this rig.** CUDA 13.1 is the newest available and the
-  only one targeting `sm_120`, but it cannot compile against glibc 2.43 —
-  see [cuda-glibc-243.md](cuda-glibc-243.md). `rocm` and `vulkan` build fine;
-  `rocm-cuda` and `vulkan-cuda` are blocked until a 13.2+ toolkit is installed.
-- **Driver coexistence under load.** `amdgpu` and the proprietary NVIDIA driver
-  are both loaded, and Vulkan drives both cards from one process. ROCm and CUDA
-  have not been initialised together in a single process, and cannot be until
-  the CUDA blocker is resolved.
+- **The distro CUDA is unusable; NVIDIA's is fine.** Ubuntu's CUDA 13.1 cannot
+  compile against glibc 2.43 — see [cuda-glibc-243.md](cuda-glibc-243.md).
+  CUDA 13.3 from NVIDIA's apt repo works, and all four backends build with it.
+- **Driver coexistence under load.** ROCm and CUDA now initialise together in a
+  single process and both cards enumerate, but no model has been loaded, so the
+  combination is untested under real memory pressure.
+- **CUDA0 misreports free memory.** In the `rocm-cuda` runtime it claims
+  199755 MiB free out of 97249 MiB total. Since llama.cpp sizes `--fit` from
+  free VRAM, this needs explaining before trusting automatic placement.
 
 ### Re-detecting all of this
 

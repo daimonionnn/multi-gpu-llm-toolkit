@@ -1,7 +1,14 @@
 # CUDA 13.1 cannot build against glibc 2.43 (Ubuntu 26.04)
 
-Affects the **`dual-linux`** rig. Blocks every backend that uses CUDA —
-`rocm-cuda` and `vulkan-cuda` — while leaving `rocm` and `vulkan` unaffected.
+> **Resolved on `dual-linux`.** CUDA 13.3 from NVIDIA's apt repository compiles
+> cleanly against glibc 2.43, and all four backends now build. Kept because the
+> distro-packaged toolkit still has this defect, so anyone starting from a
+> stock Ubuntu 26.04 will hit it — and the rejected workarounds below are worth
+> not repeating.
+
+Affected the **`dual-linux`** rig with CUDA 13.1: every backend that uses CUDA
+(`rocm-cuda`, `vulkan-cuda`) failed to build, while `rocm` and `vulkan` were
+unaffected.
 
 This is the Linux counterpart of the MSVC toolset problem documented for
 `halo-win`: the GPU is new enough that only a recent toolkit targets it, but
@@ -71,25 +78,49 @@ one. Do not ship this flag.
 
 ## Actual fix
 
-Install a CUDA Toolkit new enough for glibc 2.43 — 13.2 or later — from
-NVIDIA's own apt repository. Ubuntu 26.04 ships only 13.1 in `multiverse`, and
-the machine has no NVIDIA repo configured, so `apt` cannot currently offer a
-newer one.
+Install a CUDA Toolkit new enough for glibc 2.43 from NVIDIA's own apt
+repository. Ubuntu 26.04 ships only 13.1 in `multiverse`; NVIDIA's repo for the
+same release carries 13.3.
 
-`setup-llama.sh` already scans for the newest toolkit that supports the GPU's
-compute capability, so once a newer one is installed under `/usr/local/cuda-*`
-it will be picked up with no change to the scripts.
+```bash
+curl -sSLO https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2604/x86_64/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+sudo apt-get update
+sudo apt-get install -y cuda-toolkit-13-3
+```
 
-## Meanwhile
+**Install `cuda-toolkit-13-3`, not `cuda` or `cuda-13-3`.** The latter two pull
+in the NVIDIA display driver and would replace a working one. The
+`cuda-toolkit-*` package is driver-free — verify before committing to it:
 
-Use Vulkan for the NVIDIA card. `vulkan-vulkan` drives both GPUs through one
-backend and is unaffected — the same fallback role Vulkan plays on `halo-win`
-when ROCm misbehaves, arrived at from the opposite direction.
+```bash
+sudo apt-get install --dry-run cuda-toolkit-13-3 | grep -iE '^Inst (nvidia|libnvidia|cuda-drivers)'
+```
 
-| Backend         | Buildable on `dual-linux` today |
-|-----------------|---------------------------------|
-| `rocm`          | Yes                             |
-| `vulkan`        | Yes                             |
-| `vulkan-vulkan` | Yes (uses the `vulkan` runtime) |
-| `rocm-cuda`     | No — blocked by this bug        |
-| `vulkan-cuda`   | No — blocked by this bug        |
+Empty output means no driver is touched.
+
+`setup-llama.sh` scans for the newest toolkit that supports the GPU's compute
+capability, so the new one under `/usr/local/cuda-13.3` is picked up with no
+change to the scripts and no `PATH` edits.
+
+## Outcome
+
+With CUDA 13.3 installed, all four backends build on `dual-linux`:
+
+| Backend       | CUDA 13.1       | CUDA 13.3 |
+|---------------|-----------------|-----------|
+| `rocm`        | Built (no CUDA) | Builds    |
+| `vulkan`      | Built (no CUDA) | Builds    |
+| `rocm-cuda`   | Blocked         | Builds    |
+| `vulkan-cuda` | Blocked         | Builds    |
+
+`rocm-cuda` enumerates both vendors in a single process:
+
+```
+CUDA0: NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+ROCm0: AMD Radeon AI PRO R9700 (32624 MiB, 32550 MiB free)
+```
+
+If you are stuck on the distro toolkit, `vulkan-vulkan` remains a working
+dual-GPU fallback — one backend driving both cards, the same role Vulkan plays
+on `halo-win` when ROCm misbehaves, arrived at from the opposite direction.
