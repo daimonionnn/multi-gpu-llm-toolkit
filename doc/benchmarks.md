@@ -229,11 +229,18 @@ Two different winners: the dual generates ~1.4x faster (weights stream from two
 memory buses), but CUDA-only wins prefill beyond ~16k — in dual layer-split the
 fast card waits for the slow one on every step, and prefill is where that hurts.
 
-### Full 256k, verified stable (CUDA-only)
+### Full 256k, verified on two paths
 
-`-c 262144 --n-cpu-moe 10`: two consecutive 261,900-token prompts, including a
-full-cache clear between them — pp 531/522 t/s, tg 22.0 at full depth, no
-faults. A complete 256k prefill takes ~8.3 minutes.
+Both verified with two consecutive 261,900-token prompts including a
+full-cache clear between them, no faults:
+
+| Path | Config | pp t/s | tg @ 256k | 256k prefill |
+|---|---|---:|---:|---:|
+| IQ3_XXS, CUDA-only | `-c 262144 --n-cpu-moe 10` | 531 / 522 | 22.0 | ~8.3 min |
+| MXFP4, expert-offload dual | `-c 262144 --n-cpu-moe 12` + `-ot` | 386 / 385 | 18.4 / 18.3 | ~11.4 min |
+
+The MXFP4 run additionally survived a client interrupted mid-prefill (the
+server then cleared the partial state and refilled without incident).
 
 ### Stability: every dual layout is currently broken for this model
 
@@ -259,11 +266,14 @@ The ROCm backend (gfx1201) faults intermittently under this model's compute:
   with a 256k allocation, and ~19 t/s MoE generation on RADV.
 
 CUDA-only passed every killer scenario (130k and 256k double-probes with
-full-cache clears). `start-deepseek-v4-flash.sh` defaults to it, offers
-`--256k`, and keeps dual behind `--dual` with a warning. None of this indicts
-dual-vendor as such — dense models run the same dual runtimes without a
-hiccup; it is a backend bug exposed by brand-new model support, worth
-retesting after upstream updates.
+full-cache clears), and the expert-offload dual passed them on non-IQ quants —
+see the quantization table below. The launch profiles are split by placement:
+`start-deepseek-mxfp4.sh` (lossless reference, dual + RAM, 256k default),
+`start-deepseek-nvidia.sh` (single-card fits, plus the verified RAM-assisted
+IQ3 configs), `start-deepseek-nvidia-amd.sh` (all-VRAM dual, Q2_K_XL). None of
+this indicts dual-vendor as such — dense models run the same dual runtimes
+without a hiccup; it is a backend bug exposed by brand-new model support,
+worth retesting after upstream updates.
 
 ### Quantization comparison — and the fault isolated to i-quants
 
