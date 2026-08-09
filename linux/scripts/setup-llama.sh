@@ -24,8 +24,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$BACKEND" in
-    rocm-cuda|vulkan|vulkan-cuda) ;;
-    *) die "Invalid backend '$BACKEND'. Use rocm-cuda, vulkan or vulkan-cuda." ;;
+    rocm|rocm-cuda|vulkan|vulkan-cuda) ;;
+    *) die "Invalid backend '$BACKEND'. Use rocm, rocm-cuda, vulkan or vulkan-cuda." ;;
 esac
 
 [[ -n "$OUTPUT_DIR" ]] || OUTPUT_DIR="$LINUX_ROOT/runtime-$BACKEND"
@@ -36,6 +36,7 @@ require_cmd ninja
 
 uses_cuda=0; uses_hip=0; uses_vulkan=0
 case "$BACKEND" in
+    rocm)        uses_hip=1 ;;
     rocm-cuda)   uses_cuda=1; uses_hip=1 ;;
     vulkan)      uses_vulkan=1 ;;
     vulkan-cuda) uses_cuda=1; uses_vulkan=1 ;;
@@ -76,8 +77,20 @@ or build with --backend vulkan / vulkan-cuda instead."
     info "HIP compiler: $HIPCXX"
     info "GPU target:   $gfx"
 
-    export HIPCXX ROCM_PATH="$ROCM_ROOT" HIP_PATH="$ROCM_ROOT"
+    export HIPCXX
     export CMAKE_PREFIX_PATH="$HIP_CMAKE_PREFIX${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
+
+    # ROCM_PATH must only be set for a self-contained ROCm prefix such as
+    # /opt/rocm. With the distro layout the root is /usr, and clang would then
+    # look for device bitcode in /usr/amdgcn/bitcode, which does not exist —
+    # the compiler check fails with "cannot find ROCm device library" even
+    # though clang finds the libraries perfectly well on its own (they live in
+    # its resource dir, /usr/lib/llvm-N/lib/clang/N/amdgcn/bitcode).
+    if [[ "$ROCM_ROOT" != "/usr" ]]; then
+        export ROCM_PATH="$ROCM_ROOT" HIP_PATH="$ROCM_ROOT"
+    else
+        info "Distro ROCm layout — leaving ROCM_PATH unset so clang uses its own device libs"
+    fi
     cmake_flags+=("-DAMDGPU_TARGETS=$gfx" "-DGPU_TARGETS=$gfx")
 fi
 
@@ -90,6 +103,9 @@ fi
 
 # ── Backend flags ──────────────────────────────────────────────────────
 case "$BACKEND" in
+    rocm)
+        info "Build: ROCm (HIP) backend only — AMD GPU, no NVIDIA"
+        cmake_flags+=("-DGGML_HIP=ON" "-DGGML_CUDA=OFF" "-DGGML_VULKAN=OFF") ;;
     rocm-cuda)
         info "Build: ROCm (HIP) + CUDA backends"
         cmake_flags+=("-DGGML_HIP=ON" "-DGGML_CUDA=ON" "-DGGML_VULKAN=OFF") ;;

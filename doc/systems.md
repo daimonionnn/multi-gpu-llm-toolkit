@@ -85,12 +85,14 @@ of it is real VRAM rather than carved-out system RAM.
 - **`--tensor-split` ratio.** 96 GB vs 32 GB is roughly 3:1, so an even split
   wastes most of the NVIDIA card. Starting point is `1,3` (AMD first — that is
   the order the launcher builds `--device` in), to be tuned per model.
-- **Build prerequisites are not installed yet.** `hipcc` and `glslc` are both
-  missing, so neither `rocm-cuda` nor any Vulkan backend can be built until
-  `install-prereqs.sh` runs.
+- **CUDA is unusable on this rig.** CUDA 13.1 is the newest available and the
+  only one targeting `sm_120`, but it cannot compile against glibc 2.43 —
+  see [cuda-glibc-243.md](cuda-glibc-243.md). `rocm` and `vulkan` build fine;
+  `rocm-cuda` and `vulkan-cuda` are blocked until a 13.2+ toolkit is installed.
 - **Driver coexistence under load.** `amdgpu` and the proprietary NVIDIA driver
-  are both loaded, but ROCm and CUDA have not yet been initialised together
-  inside a single process on this machine.
+  are both loaded, and Vulkan drives both cards from one process. ROCm and CUDA
+  have not been initialised together in a single process, and cannot be until
+  the CUDA blocker is resolved.
 
 ### Re-detecting all of this
 

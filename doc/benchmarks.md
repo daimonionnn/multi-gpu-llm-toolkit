@@ -52,7 +52,9 @@ Pending. To be measured across:
 
 ## Results: `dual-linux` (Radeon AI PRO R9700 + RTX PRO 6000, Linux)
 
-Pending — the Linux implementation is still being ported.
+Pending. The `rocm` and `vulkan` backends build; `rocm-cuda` and `vulkan-cuda`
+are blocked by [cuda-glibc-243.md](cuda-glibc-243.md), so the first numbers here
+will be `vulkan-vulkan` and single-GPU `rocm`.
 
 Note the 3:1 VRAM asymmetry (96 GB NVIDIA vs 32 GB AMD): an even
 `--tensor-split 1,1` leaves most of the RTX PRO 6000 idle, so the split column

@@ -50,16 +50,29 @@ runtime_dir_for() {
                 echo "$LINUX_ROOT/runtime-vulkan"
             fi ;;
         vulkan*)     echo "$LINUX_ROOT/runtime-vulkan" ;;
+        rocm)
+            # A ROCm-only runtime is enough for single-GPU AMD, and is the only
+            # option when no usable CUDA toolkit exists (see linux/README.md).
+            if [[ -x "$LINUX_ROOT/runtime-rocm/llama-server" ]]; then
+                echo "$LINUX_ROOT/runtime-rocm"
+            else
+                echo "$LINUX_ROOT/runtime-rocm-cuda"
+            fi ;;
         *)           echo "$LINUX_ROOT/runtime-rocm-cuda" ;;
     esac
 }
 
 # Backends are built with GGML_BACKEND_DL=ON, so the .so backends are loaded at
 # runtime and must be findable. On Windows this was a PATH prepend.
+#
+# Do NOT set GGML_BACKEND_PATH to the runtime directory: ggml treats that
+# variable as the path to a single backend *library file* and logs a
+# "cannot read file data: Is a directory" error for each load attempt.
+# The directory scan already happens next to the executable.
 export_runtime_env() {
     local rt="$1"
     export LD_LIBRARY_PATH="$rt${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    export GGML_BACKEND_PATH="$rt"
+    unset GGML_BACKEND_PATH
 }
 
 # ── NVIDIA ─────────────────────────────────────────────────────────────

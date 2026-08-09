@@ -5,7 +5,7 @@
 # Does NOT install GPU drivers — those should already be working; verify with
 # ./list-devices.sh first.
 #
-# Usage: ./install-prereqs.sh [--backend rocm-cuda|vulkan|vulkan-cuda|all] [--dry-run]
+# Usage: ./install-prereqs.sh [--backend rocm|rocm-cuda|vulkan|vulkan-cuda|all] [--dry-run]
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
@@ -29,12 +29,15 @@ command -v apt-get >/dev/null 2>&1 || die \
 
 pkgs=(build-essential cmake ninja-build git pkg-config curl jq libcurl4-openssl-dev)
 
+# The Vulkan backend needs more than glslc: llama.cpp's shader generation does
+# find_package(SPIRV-Headers), which is a separate package from the compiler.
+ROCM_PKGS=(hipcc libhipblas-dev librocblas-dev rocminfo rocm-smi)
+VULKAN_PKGS=(glslc libvulkan-dev vulkan-tools spirv-headers spirv-tools glslang-dev)
+
 case "$BACKEND" in
-    rocm-cuda)   pkgs+=(hipcc libhipblas-dev librocblas-dev rocminfo rocm-smi) ;;
-    vulkan)      pkgs+=(glslc libvulkan-dev vulkan-tools) ;;
-    vulkan-cuda) pkgs+=(glslc libvulkan-dev vulkan-tools) ;;
-    all)         pkgs+=(hipcc libhipblas-dev librocblas-dev rocminfo rocm-smi
-                        glslc libvulkan-dev vulkan-tools) ;;
+    rocm|rocm-cuda) pkgs+=("${ROCM_PKGS[@]}") ;;
+    vulkan|vulkan-cuda) pkgs+=("${VULKAN_PKGS[@]}") ;;
+    all)         pkgs+=("${ROCM_PKGS[@]}" "${VULKAN_PKGS[@]}") ;;
     *) die "Invalid backend '$BACKEND'." ;;
 esac
 
@@ -53,7 +56,7 @@ sudo apt-get install -y "${pkgs[@]}"
 echo
 # The CUDA Toolkit is deliberately not in the list: the version needed depends
 # on the GPU, and distro packages are frequently too old for a recent card.
-if [[ "$BACKEND" == "rocm-cuda" || "$BACKEND" == "vulkan-cuda" || "$BACKEND" == "all" ]]; then
+if [[ "$BACKEND" == *cuda* || "$BACKEND" == all ]]; then
     arch="$(nvidia_arch 2>/dev/null || true)"
     if [[ -n "$arch" ]]; then
         if find_cuda_nvcc "$arch" >/dev/null 2>&1; then
