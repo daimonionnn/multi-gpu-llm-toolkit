@@ -278,12 +278,13 @@ the AMD card (`-ot 'blk\.(3[5-9]|4[0-2])\.ffn_.*_exps.*=ROCm0'`) plus
 | MXFP4 | 146 GB | cuda + ncmoe 18 | 299–311 | 16.4 | OK |
 | MXFP4 | 146 GB | dual `-ot` + ncmoe 10 | 480–592 | 21.2–24.6 | **OK** — full gauntlet |
 | Q8_K_XL | 151 GB | dual `-ot` + ncmoe 11 | 432–557 | 18.6–21.5 | **OK** — full gauntlet |
-| Q4_K_XL | ~115 GB | pending download | | | |
+| Q4_K_XL | 145 GB | dual `-ot` + ncmoe 10 | 489–598 | 21.5–25.1 | **OK** — full gauntlet |
 
 Each dual gauntlet pushes 165k+ tokens of prefill work through the AMD expert
 path (4k + 16k bench plus two 65k probes with a full-cache clear between
-them). MXFP4 and Q8_K_XL both survived it without a fault; IQ3_XXS faulted at
-43k in one run. That isolates the ROCm fault to the **HIP i-quant
+them). MXFP4, Q8_K_XL and Q4_K_XL all survived it without a fault — roughly
+half a million tokens of AMD expert work across three non-IQ quants — while
+IQ3_XXS faulted at 43k in one run. That isolates the ROCm fault to the **HIP i-quant
 (IQ-series) MoE kernels** on gfx1201 — MXFP4 and k-quant expert paths are
 stable, and the expert-offload dual layout is safe (and clearly better than
 CPU offload) for those quants.
@@ -304,6 +305,15 @@ the FP4 grid into a different 4-bit grid, which is lossy, and quantizes the
 non-expert tensors harder — the only one of the three below the reference.
 IQ3_XXS sits lowest; QAT models lose accuracy faster than BF16-trained ones
 once experts drop below ~3 bpw.
+
+Q4_K_XL confirmed the prediction empirically: at 145 GB it is the same size
+class as MXFP4 (the ~4.25 bpw native experts cannot shrink at "Q4"), needs the
+same placement, and measures identically within noise. Being also the lossy
+one of the pair, it is dominated by MXFP4 on every axis. **For this model,
+keep MXFP4 and skip Q4_K_XL and Q8_K_XL entirely** — the QAT release collapses
+the usual quant ladder into a single sensible choice per size class: MXFP4
+(reference quality, needs dual or CPU offload) or IQ3_XXS (fits one card,
+fastest, lowest quality).
 
 **Related: [antirez/ds4](https://github.com/antirez/ds4)** (DwarfStar) is a
 dedicated DeepSeek V4 engine with Metal/CUDA/ROCm backends. Evaluated
