@@ -397,11 +397,34 @@ offload, no AMD), `-c 131072`, measured 2026-08-10:
 
 2.5x the generation of the previous best DeepSeek config (IQ3+ncmoe8:
 29.3 tg) — eliminating the last RAM-hosted expert layers is worth far more
-than the raw bandwidth math suggests. Speed is a tie within noise; quality
-between them is untested (antirez spends bits on Q8 attention/shared/output,
-IQ2_M on bigger experts), and the antirez file also fits ~200k context. Both
-being ~2-bit re-encodes of a QAT model, quality sits below IQ3_XXS — these
-are the speed picks, MXFP4 remains the quality pick.
+than the raw bandwidth math suggests.
+
+Speed is a tie within noise, so **quality decides, and it favours antirez**
+(published numbers against a Q8 reference, not measured here):
+
+| Quant | Size | PPL | Mean KLD | Same top token |
+|---|---:|---:|---:|---:|
+| **antirez IQ2XXS+Q8-attn (imatrix)** | 86.7 | **6.0808** | **0.4079** | **78.15%** |
+| unsloth UD-IQ2_M | 85 | 7.0894 | 0.4839 | 76.56% |
+| *(context)* Q2_K_XL | 90.2 | 6.6782 | 0.4077 | 78.57% |
+| *(context)* IQ3_XXS | 97.1 | 6.1972 | 0.3079 | 81.93% |
+
+Better on every axis while being smaller. The asymmetric recipe is why:
+routed experts go to IQ2_XXS/Q2_K but attention projections, shared experts,
+router, output head and embeddings stay Q8/F16 — the per-token decision
+machinery keeps its precision while the experts, each seeing a fraction of
+tokens, absorb the loss. Its imatrix is calibrated on chat-v2 traffic, which
+the author says specifically restores tool-calling and instruction-following
+quality. That makes it the default for `start-deepseek-nvidia.sh`, and the
+right pick for agent duty among the 2-bit options.
+
+Still, all of these are ~2-bit re-encodes of a QAT model whose experts are
+natively ~4.25 bpw: ~1 token in 5 differs from the Q8 reference. They are the
+speed picks; MXFP4 remains the quality pick, and gpt-oss-120b below offers
+full fidelity of a smaller model at 3x the speed.
+
+Sources: [Unsloth DeepSeek-V4 docs](https://unsloth.ai/docs/models/deepseek-v4),
+[antirez/deepseek-v4-gguf](https://huggingface.co/antirez/deepseek-v4-gguf).
 
 ### gpt-oss-120b — the fastest model on this rig
 
