@@ -335,3 +335,29 @@ things keep it on the radar: TCP pipeline parallelism could in principle chain
 a CUDA process and a ROCm process as separate stages (prefill gains only), and
 its first-class Strix Halo support with SSD expert streaming makes it a strong
 candidate for the planned `halo-linux` rig.
+
+### RAM swap: 4 DIMMs @ 6267 -> 2 DIMMs @ 7400 MT/s
+
+Streaming-read bandwidth (`linux/scripts/membw.c`, 16 threads) went
+74.6 -> 89.9 GB/s (+20.5%) — more than the clock ratio, because dropping the
+mixed second kit also freed the subtimings. Capacity went 215 -> 122 GiB.
+
+Effect on the RAM-offload configurations, warm state (control: Qwen CUDA d=0
+moved ±0.4%):
+
+| Config | metric | before | after |
+|---|---|---:|---:|
+| MXFP4 dual 128k | tg 16k / 65k | 22.8 / 22.5 | **23.5 / 22.9** |
+| MXFP4 dual 128k | pp 16k / 65k | 592 / 562 | **613 / 586** |
+| MXFP4 dual 256k | pp / tg @ 256k | 386 / 18.4 | 389 / **18.8** |
+| IQ3 CUDA-only | tg 4k–65k | 27.7–29.7 | 28.1–29.7 (noise) |
+
++2–4% where the CPU-expert share is large (MXFP4), nothing measurable where
+it is small (IQ3) — matching the prediction from the bandwidth delta times
+the ~20–25% CPU share of token time.
+
+The capacity cost shows up exactly once per model load: with 122 GiB the
+146 GB MXFP4 model cannot stay page-cached, so the **first** prefill after a
+load pays NVMe page-in for the CPU-hosted experts (4k pp read 254 vs 480
+before — a cold-start artifact, not a regression; 16k+ numbers above are the
+steady state).

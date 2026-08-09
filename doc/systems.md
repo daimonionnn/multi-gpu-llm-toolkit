@@ -43,7 +43,7 @@ bugs. Details in [rocm-bugs.md](rocm-bugs.md).
 | Component | Details |
 |-----------|-----|
 | CPU       | Intel Core Ultra 7 270K Plus (Arrow Lake-S) |
-| RAM       | 215 GiB usable — 2×48 GB (Corsair 6000C30) + 2×64 GB (Corsair 6400C42), all at 6267 MT/s |
+| RAM       | 122 GiB usable — 2×64 GB (Corsair 6400C42) at **7400 MT/s** (previously 2×48+2×64 mixed at 6267) |
 | GPU 1     | AMD Radeon AI PRO R9700 (Gigabyte AI TOP) — RDNA 4, Navi 48, gfx1201, 31.9 GiB |
 | GPU 2     | NVIDIA RTX PRO 6000 Blackwell Workstation Edition — 95.6 GiB, compute 12.0, PCIe 5.0 x16 |
 | OS        | Ubuntu 26.04 LTS, kernel 7.0.0-29-generic |
@@ -91,13 +91,15 @@ of it is real VRAM rather than carved-out system RAM.
 - **Driver coexistence under load.** ROCm and CUDA now initialise together in a
   single process and both cards enumerate, but no model has been loaded, so the
   combination is untested under real memory pressure.
-- **Measured RAM bandwidth: 74.6 GB/s** (16-thread streaming read, ~75% of
-  the 6267 MT/s dual-channel theoretical). This is the number that prices CPU
-  expert offload in the DeepSeek profiles — each RAM-hosted expert layer costs
-  ~1 ms/token against it. Re-measure after any DIMM change
-  (`scratchpad membw.c`; a planned 4→2 DIMM swap to the 64 GB pair trades
-  ~96 GB of capacity for whatever clock the freed IMC allows — the kept kit is
-  rated 6400 C42, so gains beyond ~2% require overclocking past rating).
+- **Measured RAM bandwidth: 89.9 GB/s** after the 4→2 DIMM swap (2×64 GB at
+  7400 MT/s — 1000 above the kit's 6400 C42 rating, the freed IMC took the
+  overclock). Before: 74.6 GB/s with mixed kits at 6267 MT/s; +20.5%. Measured
+  with `linux/scripts/membw.c` (16-thread streaming read). This is the number
+  that prices CPU expert offload — each RAM-hosted MXFP4 expert layer costs
+  ~0.85 ms/token against it. The capacity cost: 215→122 GiB means the 146 GB
+  MXFP4 model no longer fits the page cache, so the first prefill after a
+  model load pays NVMe page-in for the CPU-hosted experts (visible as a
+  halved pp on the first request; steady state is unaffected).
 - **CUDA0 misreports free memory.** In the `rocm-cuda` runtime it claims
   199755 MiB free out of 97249 MiB total. Since llama.cpp sizes `--fit` from
   free VRAM, this needs explaining before trusting automatic placement.
