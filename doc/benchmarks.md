@@ -264,3 +264,14 @@ full-cache clears). `start-deepseek-v4-flash.sh` defaults to it, offers
 dual-vendor as such — dense models run the same dual runtimes without a
 hiccup; it is a backend bug exposed by brand-new model support, worth
 retesting after upstream updates.
+
+**Related: [antirez/ds4](https://github.com/antirez/ds4)** (DwarfStar) is a
+dedicated DeepSeek V4 engine with Metal/CUDA/ROCm backends. Evaluated
+2026-08-09: it does not help with this fault — different engine, its ROCm
+build targets Strix Halo (`ROCM_ARCH ?= gfx1151`, no gfx1201 mention in the
+repo), no mixed-vendor mode (tensor parallel is CUDA-pairs only), and it loads
+only its own quant recipes (IQ2_XXS experts / Q4_K / MXFP4 — not IQ3_XXS). Two
+things keep it on the radar: TCP pipeline parallelism could in principle chain
+a CUDA process and a ROCm process as separate stages (prefill gains only), and
+its first-class Strix Halo support with SSD expert streaming makes it a strong
+candidate for the planned `halo-linux` rig.
