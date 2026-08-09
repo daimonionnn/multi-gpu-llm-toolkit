@@ -345,16 +345,21 @@ mixed second kit also freed the subtimings. Capacity went 215 -> 122 GiB.
 Effect on the RAM-offload configurations, warm state (control: Qwen CUDA d=0
 moved ±0.4%):
 
-| Config | metric | before | after |
-|---|---|---:|---:|
-| MXFP4 dual 128k | tg 16k / 65k | 22.8 / 22.5 | **23.5 / 22.9** |
-| MXFP4 dual 128k | pp 16k / 65k | 592 / 562 | **613 / 586** |
-| MXFP4 dual 256k | pp / tg @ 256k | 386 / 18.4 | 389 / **18.8** |
-| IQ3 CUDA-only | tg 4k–65k | 27.7–29.7 | 28.1–29.7 (noise) |
+| Config | metric | before | after | gain |
+|---|---|---:|---:|---:|
+| MXFP4 dual 128k | tg @ 16k | 22.8 | **23.5** | +3.1% |
+| MXFP4 dual 128k | tg @ 65k | 22.5 | 22.9 | +1.8% |
+| MXFP4 dual 128k | pp @ 16k | 592 | **613** | +3.5% |
+| MXFP4 dual 128k | pp @ 65k | 562 | **586** | +4.3% |
+| MXFP4 dual 256k | pp @ 256k | 386 | 389 | +0.8% |
+| MXFP4 dual 256k | tg @ 256k | 18.4 | **18.8** | +2.2% |
+| IQ3 CUDA-only | tg 4k–65k | 27.7–29.7 | 28.1–29.7 | noise |
 
-+2–4% where the CPU-expert share is large (MXFP4), nothing measurable where
-it is small (IQ3) — matching the prediction from the bandwidth delta times
-the ~20–25% CPU share of token time.
+**Net: ~+2.5–3% for MXFP4** from a +20.5% bandwidth change — exactly what
+Amdahl allows, since only the ~20–25% CPU-expert share of token time is
+priced against RAM. Nothing measurable on IQ3, whose CPU share is small. To
+extract more from RAM speed the lever is a smaller RAM share (second GPU, or
+a smaller quant), not faster RAM.
 
 The capacity cost shows up exactly once per model load: with 122 GiB the
 146 GB MXFP4 model cannot stay page-cached, so the **first** prefill after a
