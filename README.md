@@ -8,21 +8,27 @@ Both Windows and Linux are covered, on different test machines.
 
 ## Pick your platform
 
-| Platform                | Status               | Scripts    | Start here                             |
-|-------------------------|----------------------|------------|----------------------------------------|
-| **[Windows](windows/)** | Working, benchmarked | PowerShell | [windows/README.md](windows/README.md) |
-| **[Linux](linux/)**     | In progress          | Bash       | [linux/README.md](linux/README.md)     |
+| Platform                | Status                        | Scripts    | Start here                             |
+|-------------------------|-------------------------------|------------|----------------------------------------|
+| **[Windows](windows/)** | Working, benchmarked          | PowerShell | [windows/README.md](windows/README.md) |
+| **[Linux](linux/)**     | Scripts ported, not yet built | Bash       | [linux/README.md](linux/README.md)     |
 
 ## Test systems
 
-Two physically different machines. This matters for reading any result in this
-repo — an APU with unified memory and a pair of discrete cards behave nothing
-alike, so **nothing here is a clean Windows-vs-Linux comparison**.
+Two physically different machines, with a third planned. This matters for
+reading any result in this repo — an APU with unified memory and a pair of
+discrete cards behave nothing alike, so **nothing here is currently a clean
+Windows-vs-Linux comparison**. Results are keyed by rig, never by OS.
 
-| Rig            | OS      | CPU / platform        | GPU 1                                | GPU 2                       | Memory model                   |
-|----------------|---------|-----------------------|--------------------------------------|-----------------------------|--------------------------------|
-| **halo-win**   | Windows | AMD Ryzen AI MAX+ 395 | AMD Radeon 8060S iGPU (gfx1151, UMA) | NVIDIA RTX 5090 (32 GB)     | 128 GB unified, BIOS UMA split |
-| **dual-linux** | Linux   | Intel                 | AMD Radeon AI PRO R9700 (32 GB)      | NVIDIA RTX PRO 6000 (96 GB) | Discrete VRAM, no UMA          |
+| Rig                        | OS      | CPU / platform               | GPU 1                                    | GPU 2                                 | Memory model                   |
+|----------------------------|---------|------------------------------|------------------------------------------|---------------------------------------|--------------------------------|
+| **halo-win**               | Windows | AMD Ryzen AI MAX+ 395        | AMD Radeon 8060S iGPU (gfx1151, UMA)     | NVIDIA RTX 5090 (32 GB)               | 128 GB unified, BIOS UMA split |
+| **dual-linux**             | Linux   | Intel Core Ultra 7 270K Plus | AMD Radeon AI PRO R9700 (gfx1201, 32 GB) | NVIDIA RTX PRO 6000 Blackwell (96 GB) | Discrete VRAM, no UMA          |
+| **halo-linux** *(planned)* | Linux   | AMD Ryzen AI MAX+ 395        | same hardware as halo-win                | same hardware as halo-win             | 128 GB unified, BIOS UMA split |
+
+`halo-linux` will be the Strix Halo box running Linux — the first pairing in
+this repo where an OS comparison is actually meaningful, since the hardware is
+held constant against `halo-win`.
 
 Full specs, driver versions and how to re-detect them: **[doc/systems.md](doc/systems.md)**.
 
@@ -68,7 +74,10 @@ These apply across platforms and are the reason both live in one repo:
 
 - [x] Windows: `rocm-cuda`, `vulkan`, `vulkan-vulkan`, `vulkan-cuda` building and serving
 - [x] Windows: `isLargeBar` binary patch for >64 GB UMA
-- [ ] Linux: port the build and launch scripts to bash
-- [ ] Linux: verify ROCm supports the R9700 (gfx1201) without a `HSA_OVERRIDE_GFX_VERSION` workaround
-- [ ] Linux: check whether the Strix Halo memory bugs have any discrete-GPU equivalent
-- [ ] Benchmarks for both rigs in a comparable format
+- [x] Linux: build and launch scripts ported to bash, detection and error paths verified on the rig
+- [x] Linux: confirmed ROCm supports the R9700 natively as `gfx1201` — no `HSA_OVERRIDE_GFX_VERSION` needed
+- [x] Linux: confirmed the APU/UMA bugs cannot occur on discrete cards (matrix in `doc/rocm-bugs.md`)
+- [ ] Linux: install `hipcc` and `glslc`, then actually build each backend
+- [ ] Linux: tune `--tensor-split` for the 3:1 VRAM asymmetry
+- [ ] Benchmarks for each rig
+- [ ] Stand up the `halo-linux` rig for a real same-hardware OS comparison

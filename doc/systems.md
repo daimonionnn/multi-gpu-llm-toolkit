@@ -40,33 +40,59 @@ bugs. Details in [rocm-bugs.md](rocm-bugs.md).
 
 ## `dual-linux` — Radeon AI PRO R9700 + RTX PRO 6000 (Linux)
 
-| Component | Details                                                  |
-|-----------|----------------------------------------------------------|
-| CPU       | Intel — *fill in exact model*                            |
-| RAM       | *fill in*                                                |
-| GPU 1     | AMD Radeon AI PRO R9700 32 GB (Gigabyte AI TOP) — RDNA 4 |
-| GPU 2     | NVIDIA RTX PRO 6000 96 GB — Blackwell                    |
-| OS        | Linux — *fill in distro + kernel*                        |
-| AMD stack | ROCm — *fill in version*                                 |
-| NVIDIA    | Driver + CUDA Toolkit — *fill in versions*               |
+| Component | Details |
+|-----------|-----|
+| CPU       | Intel Core Ultra 7 270K Plus (Arrow Lake-S) |
+| RAM       | 215 GiB usable |
+| GPU 1     | AMD Radeon AI PRO R9700 (Gigabyte AI TOP) — RDNA 4, Navi 48, gfx1201, 31.9 GiB |
+| GPU 2     | NVIDIA RTX PRO 6000 Blackwell Workstation Edition — 95.6 GiB, compute 12.0, PCIe 5.0 x16 |
+| OS        | Ubuntu 26.04 LTS, kernel 7.0.0-29-generic |
+| AMD stack | ROCm 7.1 (distro packages — `libamdhip64-7` 7.1.0, `rocminfo`/`rocm-smi` 7.1.1) |
+| NVIDIA    | Driver 595.84, CUDA Toolkit 13.1 at `/usr/local/cuda-13.1` |
+| Vulkan    | RADV (AMD), NVIDIA ICD, plus Intel ARL iGPU and llvmpipe |
 
 Both cards are discrete, so there is no UMA setting and no BIOS memory split.
 128 GB of combined dedicated VRAM is more than `halo-win` has in total, and all
 of it is real VRAM rather than carved-out system RAM.
 
-Open questions for this rig, to be answered by testing:
+### Verified on this rig
 
-- **gfx target of the R9700.** Expected `gfx1201` (RDNA 4). Confirm with
-  `rocminfo`, and check whether the installed ROCm version lists it as
-  officially supported — if not, `HSA_OVERRIDE_GFX_VERSION` may be needed, which
-  changes the build and launch procedure.
-- **PCIe topology.** How many lanes each card gets, and whether they sit behind
-  the same root complex. Tensor-split tuning depends on this far more here than
-  on `halo-win`, where one "GPU" was on-die.
-- **Driver coexistence.** `amdgpu` and the proprietary NVIDIA driver loaded
-  simultaneously, with both ROCm and CUDA runtimes initialised in one process.
+- **gfx1201 is natively supported.** `rocminfo` reports `gfx1201` and
+  `amdgcn-amd-amdhsa--gfx1201` directly, so **no `HSA_OVERRIDE_GFX_VERSION`
+  workaround is needed**. `setup-llama.sh` reads the target from `rocminfo` and
+  passes it as `-DAMDGPU_TARGETS`.
+- **ROCm lives in `/usr`, not `/opt/rocm`.** Ubuntu 26.04 ships ROCm as distro
+  packages; there is no `/opt/rocm` directory at all, and the CMake config sits
+  under `/usr/lib/x86_64-linux-gnu/cmake/hip`. Scripts must handle both layouts.
+- **The CUDA toolkit in `PATH` is too old for this GPU.** `/usr/bin/nvcc` is
+  CUDA 12.4, which tops out at `compute_90` — the RTX PRO 6000 is `sm_120`.
+  CUDA 13.1 is installed alongside at `/usr/local/cuda-13.1` and does support
+  `compute_120`, but it is not first in `PATH`. Building without pinning the
+  right toolkit fails with "unsupported gpu architecture". `setup-llama.sh`
+  detects the GPU's compute capability and picks a toolkit that supports it —
+  the Linux analogue of the MSVC toolset workaround on Windows.
+- **Four Vulkan devices are visible, not two.** RADV (AMD) and the NVIDIA ICD,
+  but also the Intel Arrow Lake iGPU and the llvmpipe software rasteriser.
+  Selecting Vulkan devices by index would pick the wrong pair, so
+  `start-llama-server.sh` matches on the device description instead.
 
-### Filling in the unknowns
+### Still open
+
+- **PCIe topology for the AMD card.** The RTX PRO 6000 negotiates gen5 x16.
+  The R9700's link width has not been read yet (needs root for `lspci -vv`).
+  Tensor-split tuning depends on this far more here than on `halo-win`, where
+  one "GPU" was on-die.
+- **`--tensor-split` ratio.** 96 GB vs 32 GB is roughly 3:1, so an even split
+  wastes most of the NVIDIA card. Starting point is `1,3` (AMD first — that is
+  the order the launcher builds `--device` in), to be tuned per model.
+- **Build prerequisites are not installed yet.** `hipcc` and `glslc` are both
+  missing, so neither `rocm-cuda` nor any Vulkan backend can be built until
+  `install-prereqs.sh` runs.
+- **Driver coexistence under load.** `amdgpu` and the proprietary NVIDIA driver
+  are both loaded, but ROCm and CUDA have not yet been initialised together
+  inside a single process on this machine.
+
+### Re-detecting all of this
 
 ```bash
 # CPU / RAM / kernel / distro
@@ -78,15 +104,28 @@ uname -r
 # AMD: gfx target, VRAM, ROCm version
 rocminfo | grep -E 'Name:|gfx|Marketing'
 rocm-smi --showproductname --showmeminfo vram
-cat /opt/rocm/.info/version
+cat /opt/rocm/.info/version 2>/dev/null || dpkg -l | grep -E 'rocminfo|libamdhip'
 
 # NVIDIA: model, VRAM, driver, CUDA
 nvidia-smi --query-gpu=name,memory.total,driver_version,compute_cap --format=csv
-nvcc --version | tail -2
+nvcc --version | tail -2                  # NOTE: may not be the toolkit that gets used
+ls -d /usr/local/cuda*/bin/nvcc            # other toolkits installed alongside
 
 # PCIe topology and negotiated link width
 lspci -nn | grep -Ei 'vga|3d|display'
 nvidia-smi --query-gpu=name,pcie.link.width.current,pcie.link.gen.current --format=csv
 ```
 
-Paste the results into the table above, replacing the *fill in* placeholders.
+`./linux/scripts/list-devices.sh` prints most of this in one go, and works
+before anything has been built.
+
+## Planned: `halo-linux` — Strix Halo on Linux
+
+The Strix Halo machine will eventually also run Linux, giving a third rig and
+the first genuine same-hardware OS comparison in this repo.
+
+That combination re-activates documentation that is dormant for `dual-linux`:
+the APU and UMA bugs in [rocm-bugs.md](rocm-bugs.md) apply again, and the TTM
+kernel-parameter workarounds described there — irrelevant to a discrete card —
+become the primary tuning lever. Benchmarks against `halo-win` will be directly
+comparable, which no pair of current rigs is.

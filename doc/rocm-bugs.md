@@ -16,10 +16,14 @@ BIOS UMA split, no WDDM. See [systems.md](systems.md) for both rigs.
 | **2. KV cache spill**            | WDDM + starved GART at 96 GB UMA | Affected at 96 GB UMA         | Not applicable                  | No shared memory pool to spill into          |
 | **3. `hipMallocManaged` broken** | gfx1151-specific                 | Affected                      | Untested — verify on gfx1201    | Different silicon; may or may not carry over |
 
-Bug 3 is the only one worth re-testing on the Linux rig. The Linux-side notes in
-[Workarounds for Linux users](#workarounds-for-linux-users) below were written
-for Strix Halo *on Linux* — they concern TTM kernel parameters for APU memory
-and are likewise irrelevant to a discrete card.
+Bug 3 is the only one worth re-testing on `dual-linux`.
+
+The Linux-side notes in [Workarounds for Linux users](#workarounds-for-linux-users)
+below were written for Strix Halo *on Linux*. They concern TTM kernel parameters
+for APU memory, so they do nothing for a discrete card — but they are **not**
+dead weight: a `halo-linux` rig is planned (see [systems.md](systems.md)), and on
+that machine these workarounds become the main tuning lever, in place of the
+Windows binary patch. Keep them.
 
 ---
 
