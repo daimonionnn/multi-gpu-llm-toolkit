@@ -98,6 +98,19 @@ modes. That was a WDDM workaround; on Linux pinned host memory works normally
 and disabling it costs transfer bandwidth. Here it is **off by default** and
 available as `--no-pinned` if a problem shows up.
 
+## Web UI
+
+Upstream ships the llama-server browser UI as a separate release asset since
+`b10331`. Fetch it once and every launched server serves it at its root URL:
+
+```bash
+mkdir -p ../webui
+gh release download b10331 --repo ggml-org/llama.cpp --pattern "llama-b10331-ui.tar.gz" -O - | tar xz -C ../webui --strip-components=1
+```
+
+`start-llama-server.sh` picks `linux/webui/` up automatically (skipped if you
+pass your own `--path`). Without it the API still works but `/` returns 415.
+
 ## Prerequisites
 
 `install-prereqs.sh` handles the apt side: `build-essential`, `cmake`,

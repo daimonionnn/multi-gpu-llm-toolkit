@@ -36,3 +36,4 @@ llama.cpp/
 *.original
 *.patched
 $logPath
+webui/

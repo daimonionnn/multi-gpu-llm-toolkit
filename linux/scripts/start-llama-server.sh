@@ -140,6 +140,18 @@ if [[ -n "$MODEL_PATH" && ! -f "$MODEL_PATH" ]]; then
     die "Model file not found: $MODEL_PATH"
 fi
 
+# ── Web UI ─────────────────────────────────────────────────────────────
+# Since b10331 upstream ships the server web UI as a separate release asset
+# (llama-<build>-ui.tar.gz) instead of embedding it; without it the server
+# answers API calls but returns 415 on /. If the UI has been extracted to
+# linux/webui/, serve it - unless the caller passed their own --path.
+WEBUI_DIR="$LINUX_ROOT/webui"
+if [[ -f "$WEBUI_DIR/index.html" ]]; then
+    has_path=0
+    for a in "${EXTRA_ARGS[@]}"; do [[ "$a" == "--path" ]] && { has_path=1; break; }; done
+    (( has_path )) || EXTRA_ARGS+=(--path "$WEBUI_DIR")
+fi
+
 # ── Summary ────────────────────────────────────────────────────────────
 info "llama-server  [$MODE]"
 [[ -n "$MODEL_PATH" ]] && info "  Model:    $MODEL_PATH"
