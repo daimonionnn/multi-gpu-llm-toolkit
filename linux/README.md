@@ -39,7 +39,9 @@ Everything after `--` goes to `llama-server` untouched — the equivalent of
 | `benchmark-loaded-model.sh` | End-to-end HTTP benchmark against a running server | `benchmark-loaded-model.ps1`  |
 | `start-open-webui.sh`       | Open WebUI frontend via Docker                     | `start-open-webui.ps1`        |
 | `start-model-template.sh`   | Model profile template — copy per model            | `start-qwen122b-q6k.ps1` etc. |
-| `start-deepseek-v4-flash.sh` | DeepSeek V4 Flash profile: MXFP4 expert-offload dual by default; `--iq3`/`--256k` CUDA-only | — |
+| `start-deepseek-mxfp4.sh`   | DeepSeek V4 Flash, MXFP4 (lossless reference): expert-offload dual + RAM, 256k default | — |
+| `start-deepseek-nvidia.sh`  | DeepSeek V4 Flash entirely on the NVIDIA card (IQ2_XXS/128k, `--200k` IQ1_M); `--iq3*` RAM-assisted | — |
+| `start-deepseek-nvidia-amd.sh` | DeepSeek V4 Flash entirely in VRAM across both cards (Q2_K_XL, 200k) | — |
 | `build-cuda12-container.sh` | CUDA backend built with CUDA 12.8 in Docker; merges into a dual runtime | — |
 
 Backend modes match Windows — with `.so` backends in place of `.dll`, plus one
