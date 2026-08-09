@@ -40,6 +40,7 @@ Everything after `--` goes to `llama-server` untouched — the equivalent of
 | `start-open-webui.sh`       | Open WebUI frontend via Docker                     | `start-open-webui.ps1`        |
 | `start-model-template.sh`   | Model profile template — copy per model            | `start-qwen122b-q6k.ps1` etc. |
 | `start-deepseek-mxfp4.sh`   | DeepSeek V4 Flash, MXFP4 (lossless reference): expert-offload dual + RAM, 256k default | — |
+| `start-deepseek-mxfp4-cuda-only.sh` | The same, NVIDIA-only — fault-immune profile the systemd fallback service runs | — |
 | `start-deepseek-nvidia.sh`  | DeepSeek V4 Flash entirely on the NVIDIA card (IQ2_XXS/128k, `--200k` IQ1_M); `--iq3*` RAM-assisted | — |
 | `start-deepseek-nvidia-amd.sh` | DeepSeek V4 Flash entirely in VRAM across both cards (Q2_K_XL, 200k) | — |
 | `build-cuda12-container.sh` | CUDA backend built with CUDA 12.8 in Docker; merges into a dual runtime | — |
