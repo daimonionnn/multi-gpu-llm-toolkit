@@ -18,7 +18,8 @@ Both Windows and Linux are covered, on different test machines.
 > applied unchanged to Blackwell. Two ways around it:
 >
 > - build with `./scripts/setup-llama.sh --backend rocm-cuda --patches` (one-line
->   fix shipped in [linux/patches/](linux/patches/), restores 2-5x), or
+>   fix shipped in [linux/patches/](linux/patches/); measured 3.3-4.2x recovery
+>   at 32k on every CUDA configuration), or
 > - drive the NVIDIA card with **Vulkan** instead of CUDA, which is unaffected
 >   and costs only ~3% at short context.
 >

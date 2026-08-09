@@ -126,7 +126,9 @@ Prompt processing degrades in the same shape: at 32k, `vulkan (NVIDIA)` holds
 **Everything containing CUDA collapses; nothing else does.** That is the whole
 story of this table, and it is a llama.cpp bug rather than a property of the
 hardware -- [cuda-fa-blackwell.md](cuda-fa-blackwell.md) has the cause, the
-exact 8192 threshold, the power measurements and the fix.
+exact 8192 threshold, the power measurements and the fix. Building with
+`--patches` recovers 3.3-4.2x at 32k on every CUDA configuration, without
+changing the non-CUDA ones.
 
 Two things in this table are *not* about that bug and are worth keeping:
 

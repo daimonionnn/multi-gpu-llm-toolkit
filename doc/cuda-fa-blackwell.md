@@ -118,6 +118,31 @@ Measured after rebuilding only `fattn.cu`:
 
 The cliff disappears completely; the curve becomes as flat as Vulkan's.
 
+Re-measured afterwards across the whole configuration matrix (Qwen3.6-27B
+UD-Q4_K_XL, tg128 at depth 32768, one run each, nothing else on the GPUs):
+
+| Config | Stock | Patched | |
+|---|---:|---:|---:|
+| cuda (NVIDIA) | 13 | **56** | 4.24x |
+| rocm-cuda (dual) | 14 | **46** | 3.33x |
+| vulkan-cuda (dual) | 13 | **41** | 3.27x |
+| vulkan (NVIDIA) | 65 | 65 | control |
+| vulkan-vulkan (dual) | 44 | 44 | control |
+| vulkan (AMD) | 27 | 27 | control |
+| rocm (AMD) | 25 | 25 | control |
+
+Every configuration containing CUDA recovers; the four that cannot be touched by
+the patch stay within 1%, which is what makes the first three trustworthy. Depth
+0 and 4096 are unchanged (78 -> 77, 75 -> 74), as expected from a change that
+only takes effect at KV >= 8192, and prompt processing is unchanged everywhere
+because it never used the vector kernel.
+
+**The patch does not make CUDA the best choice at long context.** At 32k,
+Vulkan on the same card still leads (65 vs 56 t/s); CUDA is ahead at short
+context (77 vs 73 at depth 0) and the two cross over somewhere in between. Among
+dual configurations the patch does restore `rocm-cuda` to the top at 32k
+(46 vs 44 for `vulkan-vulkan`), reversing the stock ordering.
+
 ### Applying it
 
 `setup-llama.sh` applies everything in `linux/patches/` when given `--patches`:
