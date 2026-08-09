@@ -11,9 +11,9 @@
 # Full numbers and the stability matrix: doc/benchmarks.md, DeepSeek section.
 #
 # Usage:
-#   ./start-deepseek-v4-flash.sh                 # IQ3_XXS, CUDA-only, 128k - fastest
+#   ./start-deepseek-v4-flash.sh                 # MXFP4, expert-offload dual, 128k - best quality (default)
+#   ./start-deepseek-v4-flash.sh --iq3           # IQ3_XXS, CUDA-only, 128k - fastest
 #   ./start-deepseek-v4-flash.sh --256k          # IQ3_XXS, CUDA-only, full 256k
-#   ./start-deepseek-v4-flash.sh --mxfp4         # MXFP4, expert-offload dual, 128k - best quality
 #   ./start-deepseek-v4-flash.sh --dual          # IQ3_XXS classic dual - UNSTABLE (IQ kernels)
 #   ./start-deepseek-v4-flash.sh -- --port 8090  # extra llama-server args
 
@@ -23,30 +23,33 @@ LINUX_ROOT="$(dirname -- "$SCRIPT_DIR")"
 MODEL_IQ3=/home/matt/.lmstudio/models/unsloth/DeepSeek-V4-Flash-0731-GGUF/DeepSeek-V4-Flash-0731-UD-IQ3_XXS-00001-of-00004.gguf
 MODEL_MXFP4=/home/matt/.lmstudio/models/lmstudio-community/DeepSeek-V4-Flash-0731-GGUF/DeepSeek-V4-Flash-0731-MXFP4-00001-of-00004.gguf
 
-MODEL="$MODEL_IQ3"
-MODE_ARGS=(--mode cuda)
-MODEL_ARGS=(-c 131072 --n-cpu-moe 8)
+# Default: the lossless quant on the expert-offload dual. Every layer, the KV
+# cache and attention stay on CUDA0 (-ts 0,1); the AMD card serves expert
+# matmuls for 8 layers from VRAM; experts of the first 10 layers go to system
+# RAM. Gauntlet-verified stable; 480-592 pp, 21-25 tg.
+MODEL="$MODEL_MXFP4"
+MODE_ARGS=(--mode rocm-cuda)
+MODEL_ARGS=(-c 131072 --n-cpu-moe 10
+            -ts 0,1 -ot 'blk\.(3[5-9]|4[0-2])\.ffn_.*_exps.*=ROCm0')
 case "${1:-}" in
+    --iq3)
+        shift
+        MODEL="$MODEL_IQ3"
+        MODE_ARGS=(--mode cuda)
+        MODEL_ARGS=(-c 131072 --n-cpu-moe 8)
+        ;;
     --256k)
         shift
-        # Verified: two consecutive 261900-token prefills incl. a full-cache clear.
+        # IQ3 CUDA-only is the verified 256k path: two consecutive
+        # 261900-token prefills incl. a full-cache clear.
+        MODEL="$MODEL_IQ3"
+        MODE_ARGS=(--mode cuda)
         MODEL_ARGS=(-c 262144 --n-cpu-moe 10)
-        ;;
-    --mxfp4)
-        shift
-        # Lossless quant on the expert-offload dual: every layer, the KV cache
-        # and attention stay on CUDA0 (-ts 0,1); the AMD card serves expert
-        # matmuls for 8 layers from VRAM; experts of the first 10 layers go to
-        # system RAM. Gauntlet-verified stable; 480-592 pp, 21-25 tg.
-        MODEL="$MODEL_MXFP4"
-        MODE_ARGS=(--mode rocm-cuda)
-        MODEL_ARGS=(-c 131072 --n-cpu-moe 10
-                    -ts 0,1 -ot 'blk\.(3[5-9]|4[0-2])\.ffn_.*_exps.*=ROCm0')
         ;;
     --dual)
         shift
         echo "WARNING: classic dual is unstable with the IQ3 quant (HIP IQ-kernel faults)." >&2
-        echo "         For a stable dual use --mxfp4 instead." >&2
+        echo "         The default (no flag) is the stable MXFP4 expert-offload dual." >&2
         MODE_ARGS=(--mode rocm-cuda)
         MODEL_ARGS=(-c 262144)
         ;;
