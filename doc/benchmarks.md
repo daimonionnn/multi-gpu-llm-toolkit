@@ -229,23 +229,38 @@ Two different winners: the dual generates ~1.4x faster (weights stream from two
 memory buses), but CUDA-only wins prefill beyond ~16k — in dual layer-split the
 fast card waits for the slow one on every step, and prefill is where that hurts.
 
-### Stability: the dual mode is currently broken for this model
+### Full 256k, verified stable (CUDA-only)
 
-The DSV4-specific KV-cache code (`llama_kv_cache_dsv4`, days old in llama.cpp)
-faults intermittently on the ROCm backend (gfx1201):
+`-c 262144 --n-cpu-moe 10`: two consecutive 261,900-token prompts, including a
+full-cache clear between them — pp 531/522 t/s, tg 22.0 at full depth, no
+faults. A complete 256k prefill takes ~8.3 minutes.
+
+### Stability: every dual layout is currently broken for this model
+
+The ROCm backend (gfx1201) faults intermittently under this model's compute:
 
 - `HSA_STATUS_ERROR_MEMORY_FAULT` mid-prefill at ~43k tokens (fresh cache,
-  `-c 98304`) — yet a full 130k prefill passed at `-c 131072`, so the fault is
-  intermittent, not a size threshold.
-- Crash in the first decode after clearing a full ~130k cache
-  (`llama_kv_cache_dsv4::clear_compressed` → next `decode()` faults).
-- The Vulkan backend is no refuge: `vk::ErrorDeviceLost` ~20k tokens into
-  prefill with a 256k allocation, and MoE generation is only ~19 t/s on RADV.
+  `-c 98304`) — yet a full 130k prefill passed at `-c 131072`. Not a size
+  threshold; probabilistic with the amount of work done.
+- Crash in the first decode after clearing a full ~130k cache.
+- The decisive experiment: an `-ot` layout with **only expert FFN weights** on
+  the AMD card (`-ts 0,1 -ot 'blk\.(3[1-9]|4[0-2])\.ffn_.*_exps.*=ROCm0'`) —
+  no KV, no attention, no DSV4 cache structures on ROCm — still faulted, at
+  225k tokens into a 262k prefill. That acquits the DSV4 cache code (blamed
+  here in an earlier revision) and points at the **HIP MoE expert-matmul /
+  IQ3_XXS i-quant path**. The same card ran hours of dense Q4/Q6 Qwen and
+  Hermes benchmarks on ROCm without a single fault.
+- The expert-offload layout is otherwise excellent while it lasts: 57.0 t/s
+  generation at short context — faster than the classic dual (47.4), because
+  the NVIDIA card runs attention while the AMD card serves expert matmuls from
+  VRAM in parallel instead of the cards taking turns. Worth revisiting once
+  the HIP fault is fixed upstream.
+- Vulkan is no refuge either: `vk::ErrorDeviceLost` ~20k tokens into prefill
+  with a 256k allocation, and ~19 t/s MoE generation on RADV.
 
-CUDA-only passed the exact scenarios that kill ROCm: two consecutive 130k
-prefills with a full-cache clear between them, plus the 4k–65k sweep, no
-faults. `start-deepseek-v4-flash.sh` therefore defaults to CUDA-only with
-`--n-cpu-moe 8` (88 GB on the card, experts of 8 layers in RAM) and keeps the
-dual behind a `--dual` flag with a warning. None of this indicts dual-vendor
-as such — Qwen and Hermes run the same dual runtimes without a hiccup; it is
-an upstream bug in brand-new model support, worth retesting after updates.
+CUDA-only passed every killer scenario (130k and 256k double-probes with
+full-cache clears). `start-deepseek-v4-flash.sh` defaults to it, offers
+`--256k`, and keeps dual behind `--dual` with a warning. None of this indicts
+dual-vendor as such — dense models run the same dual runtimes without a
+hiccup; it is a backend bug exposed by brand-new model support, worth
+retesting after upstream updates.

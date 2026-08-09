@@ -12,6 +12,7 @@
 #
 # Usage:
 #   ./start-deepseek-v4-flash.sh                 # stable: CUDA-only, 128k ctx
+#   ./start-deepseek-v4-flash.sh --256k          # stable: CUDA-only, full 256k ctx
 #   ./start-deepseek-v4-flash.sh --dual          # faster tg, UNSTABLE today
 #   ./start-deepseek-v4-flash.sh -- --port 8090  # extra llama-server args
 
@@ -22,7 +23,11 @@ MODEL=/home/matt/.lmstudio/models/unsloth/DeepSeek-V4-Flash-0731-GGUF/DeepSeek-V
 
 MODE_ARGS=(--mode cuda)
 MODEL_ARGS=(-c 131072 --n-cpu-moe 8)
-if [[ "${1:-}" == "--dual" ]]; then
+if [[ "${1:-}" == "--256k" ]]; then
+    shift
+    # Verified: two consecutive 261900-token prefills incl. a full-cache clear.
+    MODEL_ARGS=(-c 262144 --n-cpu-moe 10)
+elif [[ "${1:-}" == "--dual" ]]; then
     shift
     echo "WARNING: dual rocm-cuda is unstable for this model (intermittent ROCm faults)." >&2
     MODE_ARGS=(--mode rocm-cuda)
