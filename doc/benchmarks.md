@@ -265,6 +265,34 @@ dual-vendor as such — dense models run the same dual runtimes without a
 hiccup; it is a backend bug exposed by brand-new model support, worth
 retesting after upstream updates.
 
+### Quantization comparison — and the fault isolated to i-quants
+
+Same rig, `-c 131072`, expert-offload dual = `-ts 0,1` with 8 expert layers on
+the AMD card (`-ot 'blk\.(3[5-9]|4[0-2])\.ffn_.*_exps.*=ROCm0'`) plus
+`--n-cpu-moe` for the remainder:
+
+| Quant | Size | Config | pp t/s | tg t/s | Stability |
+|---|---:|---|---:|---:|---|
+| IQ3_XXS | 98 GB | cuda + ncmoe 8 | 936–986 | 29.3 | OK (256k verified) |
+| IQ3_XXS | 98 GB | dual `-ot` | — | 57.0 | **HIP fault** at 43k–225k |
+| MXFP4 | 146 GB | cuda + ncmoe 18 | 299–311 | 16.4 | OK |
+| MXFP4 | 146 GB | dual `-ot` + ncmoe 10 | 480–592 | 21.2–24.6 | **OK** — full gauntlet |
+| Q8_K_XL | 151 GB | dual `-ot` + ncmoe 11 | 432–557 | 18.6–21.5 | **OK** — full gauntlet |
+| Q4_K_XL | ~115 GB | pending download | | | |
+
+Each dual gauntlet pushes 165k+ tokens of prefill work through the AMD expert
+path (4k + 16k bench plus two 65k probes with a full-cache clear between
+them). MXFP4 and Q8_K_XL both survived it without a fault; IQ3_XXS faulted at
+43k in one run. That isolates the ROCm fault to the **HIP i-quant
+(IQ-series) MoE kernels** on gfx1201 — MXFP4 and k-quant expert paths are
+stable, and the expert-offload dual layout is safe (and clearly better than
+CPU offload) for those quants.
+
+Practical reading: for quants that fit entirely on the NVIDIA card (IQ3_XXS),
+CUDA-only remains the choice. For the larger quants that cannot fit, the
+expert-offload dual beats CPU offload by ~1.5–1.9x on prefill and ~1.3–1.5x on
+generation, and is stable on non-IQ quants.
+
 **Related: [antirez/ds4](https://github.com/antirez/ds4)** (DwarfStar) is a
 dedicated DeepSeek V4 engine with Metal/CUDA/ROCm backends. Evaluated
 2026-08-09: it does not help with this fault — different engine, its ROCm
