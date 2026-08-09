@@ -14,8 +14,10 @@ Both Windows and Linux are covered, on different test machines.
 > The GPU sits at ~210 W instead of ~410 W. It is not a hardware fault and not
 > your driver.
 >
-> The cause is a flash-attention kernel heuristic tuned on RTX 4000 / Ada and
-> applied unchanged to Blackwell. Two ways around it:
+> **The cause is under revision** - LM Studio's llama.cpp build of nearly the
+> same revision does not have this problem, so the explanation is more likely
+> something in how this repo builds llama.cpp than the heuristic first blamed.
+> The workarounds below are measured and do work on this build:
 >
 > - build with `./scripts/setup-llama.sh --backend rocm-cuda --patches` (one-line
 >   fix shipped in [linux/patches/](linux/patches/); measured 3.3-4.2x recovery

@@ -128,9 +128,12 @@ for ctx in "${CTX_LIST[@]}"; do
     warn "Preparing prompt for context $ctx (target ~$target prompt tokens) ..."
     prompt_tokens="$(build_prompt "$target")"
 
+    # ignore_eos is required, not cosmetic: on a synthetic prompt the model
+    # usually emits EOS on the first token, and the run then reports a
+    # generation rate computed from a single token.
     jq -nc --rawfile p "$WORK_DIR/prompt.txt" --argjson n "$PREDICT_TOKENS" \
        '{prompt:$p, n_predict:$n, temperature:0.1, top_p:0.95, top_k:40,
-         cache_prompt:false, stream:false}' > "$WORK_DIR/payload.json"
+         cache_prompt:false, stream:false, ignore_eos:true}' > "$WORK_DIR/payload.json"
 
     for (( p = 1; p <= MAX_PARALLEL; p++ )); do
         warn "Context $ctx — prompt tokens $prompt_tokens — parallel requests: $p"

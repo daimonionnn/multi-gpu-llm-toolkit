@@ -1,5 +1,26 @@
 # CUDA token generation collapses at 8192 context on Blackwell (sm_120)
 
+> ### ⚠ UNDER REVISION - the root cause below is NOT established
+>
+> A comparison against LM Studio's own llama.cpp build (commit `fe2adf0`, only
+> 79 commits behind ours, **containing the identical heuristic**) shows it does
+> **not** collapse: 72.6 t/s at 12k context where our build gives 27.6.
+>
+> Since then these have been ruled out as the difference: the source revision
+> (no flash-attention commits between the two), the CUDA architecture target
+> (both compile `sm_120a`), a multi-arch build, HIP being co-compiled, and the
+> measurement method. Register usage of the exact kernel instantiation in play
+> is identical between the two builds (REG:192 vs 192).
+>
+> Worse, LM Studio's build is also **3.8x faster at prompt processing**
+> (3382 vs 879 t/s at 12k), which the flash-attention heuristic cannot explain
+> because prefill never uses the vector kernel. That points at a systemic
+> difference in how this repo builds llama.cpp, not at the heuristic.
+>
+> The patch in `linux/patches/` does measurably help *this* build, and those
+> measurements stand. What is wrong is the explanation of *why*. Treat the
+> analysis below as a hypothesis that has since failed a check.
+
 On the **`dual-linux`** rig, llama.cpp's CUDA backend loses half to four fifths of
 its token-generation throughput the moment the KV cache reaches 8192 tokens. The
 Vulkan backend on the *same* GPU is unaffected.
