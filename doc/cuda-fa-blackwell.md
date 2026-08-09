@@ -1,33 +1,12 @@
 # CUDA token generation collapses at 8192 context on Blackwell (sm_120)
 
-> ### ⚠ UNDER REVISION - the root cause below is NOT established
+> ### Status: cause narrowed to the CUDA toolkit, not the heuristic
 >
-> A comparison against LM Studio's own llama.cpp build (commit `fe2adf0`, only
-> 79 commits behind ours, **containing the identical heuristic**) shows it does
-> **not** collapse: 72.6 t/s at 12k context where our build gives 27.6.
+> The original conclusion below - that llama.cpp's Ada-tuned flash-attention
+> heuristic is at fault - **did not survive checking** and is retained only as a
+> record of the reasoning. See [What it actually is](#what-it-actually-is).
 >
-> Since then these have been ruled out as the difference: the source revision
-> (no flash-attention commits between the two), the CUDA architecture target
-> (both compile `sm_120a`), a multi-arch build, HIP being co-compiled, and the
-> measurement method. Register usage of the exact kernel instantiation in play
-> is identical between the two builds (REG:192 vs 192).
->
-> Worse, LM Studio's build is also **3.8x faster at prompt processing**
-> (3382 vs 879 t/s at 12k), which the flash-attention heuristic cannot explain
-> because prefill never uses the vector kernel. That points at a systemic
-> difference in how this repo builds llama.cpp, not at the heuristic.
->
-> The patch in `linux/patches/` does measurably help *this* build, and those
-> measurements stand. What is wrong is the explanation of *why*. Treat the
-> analysis below as a hypothesis that has since failed a check.
-
-On the **`dual-linux`** rig, llama.cpp's CUDA backend loses half to four fifths of
-its token-generation throughput the moment the KV cache reaches 8192 tokens. The
-Vulkan backend on the *same* GPU is unaffected.
-
-Root cause identified, mechanism confirmed by measurement, and a one-line local
-fix verified and shipped in this repo. Not found in upstream issues as of
-2026-08-09; deliberately kept local rather than reported.
+> The measurements are all valid. The explanation was wrong.
 
 ## Symptom
 
@@ -69,7 +48,7 @@ The card is healthy — it pulls 392 W on prefill and 503 W under Vulkan, with n
 throttling reported. Under CUDA at depth it simply is not being fed. Low power
 draw is the most visible symptom of this bug.
 
-## Cause
+## The hypothesis that failed
 
 `ggml/src/ggml-cuda/fattn.cu`, in `ggml_cuda_get_best_fattn_kernel()`:
 
@@ -190,6 +169,52 @@ kernel to begin with.
 
 Not affected: Vulkan on the same card, ROCm and Vulkan on the AMD card, and any
 context below 8192.
+
+## What it actually is
+
+LM Studio ships its own Linux CUDA build of llama.cpp. On the same card, same
+model and same measurement it does **not** collapse: 72.6 t/s at 12k context
+where our build gives 27.6. Its version string is `fe2adf0`, 79 commits behind
+ours, and no flash-attention commit sits between the two - the heuristic above
+is byte-identical in both.
+
+Ruled out, each by direct test:
+
+| Candidate | Test | Result |
+|---|---|---|
+| llama.cpp revision | `git log fe2adf0..HEAD -- ggml/src/ggml-cuda/fattn*` | no FA commits |
+| `sm_120` vs `sm_120a` | gencode flags in `build.ninja` | both already `compute_120a` |
+| Single vs multi-arch | rebuilt with LM Studio's six-arch list | collapses identically |
+| HIP co-compiled | CUDA-only build | collapses identically |
+| llama-bench vs HTTP | both methods, both builds | agree |
+| Worse codegen | `cuobjdump -res-usage` on the exact kernel | REG 192 vs 192, 181 vs 180 |
+| Our build process | our Vulkan build vs **official** `b10331` Vulkan build | within 1-2% on both GPUs |
+
+That last row matters most: this repo builds llama.cpp correctly. Our Vulkan
+binary matches upstream's own release of the identical commit (2663 vs 2646
+pp512 on NVIDIA, 1020 vs 1007 on AMD).
+
+**The only remaining difference is the CUDA toolkit.** We build with CUDA 13.3;
+LM Studio's build reports `built with GNU 12.3.0`, i.e. a CUDA 12.x toolchain.
+
+This is circumstantial - strong elimination, no direct proof - and it cannot be
+closed on this machine:
+
+- CUDA 12.x cannot compile here at all, for the glibc 2.43 reason in
+  [cuda-glibc-243.md](cuda-glibc-243.md). It is older than 13.1, which already
+  fails.
+- NVIDIA's `ubuntu2604` repository carries only 13.x.
+- Swapping LM Studio's `libggml-cuda.so` into our runtime fails: the backend
+  will not load across a 79-commit ABI gap.
+
+### What to do about it
+
+- **Use Vulkan for the NVIDIA card.** It is unaffected, costs ~3% at short
+  context, and is faster than patched CUDA past ~8k anyway.
+- **Or use a CUDA 12.x-built binary**, such as the one LM Studio ships.
+- The patch in `linux/patches/` still helps *this* build by 3.3-4.2x and its
+  measurements stand, but it treats a symptom of the toolchain rather than a
+  bug in llama.cpp. Do not report it upstream.
 
 ## Related upstream reports
 

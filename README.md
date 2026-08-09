@@ -14,16 +14,18 @@ Both Windows and Linux are covered, on different test machines.
 > The GPU sits at ~210 W instead of ~410 W. It is not a hardware fault and not
 > your driver.
 >
-> **The cause is under revision** - LM Studio's llama.cpp build of nearly the
-> same revision does not have this problem, so the explanation is more likely
-> something in how this repo builds llama.cpp than the heuristic first blamed.
-> The workarounds below are measured and do work on this build:
+> The cause is **the CUDA toolkit used to build llama.cpp**, not llama.cpp
+> itself and not your hardware: a CUDA 12.x build of the same commit (the one
+> LM Studio ships) does not have the problem, while our CUDA 13.3 build does.
+> There is no official Linux CUDA binary from upstream, so anyone on Linux is
+> building their own and can hit this. Options:
 >
 > - build with `./scripts/setup-llama.sh --backend rocm-cuda --patches` (one-line
 >   fix shipped in [linux/patches/](linux/patches/); measured 3.3-4.2x recovery
 >   at 32k on every CUDA configuration), or
-> - drive the NVIDIA card with **Vulkan** instead of CUDA, which is unaffected
->   and costs only ~3% at short context.
+> - drive the NVIDIA card with **Vulkan** instead of CUDA, which is unaffected,
+>   costs only ~3% at short context and is faster than patched CUDA past ~8k, or
+> - use a binary built with CUDA 12.x, such as LM Studio's.
 >
 > Full analysis, measurements and reproduction: **[doc/cuda-fa-blackwell.md](doc/cuda-fa-blackwell.md)**.
 

@@ -164,11 +164,23 @@ backend collapses as context grows** — at 32k depth it retains 9% of prompt an
 The CUDA backend also aborts outright with `-fa off` (`CUDA error: invalid
 argument`) at every depth, so it is flash-attention-only here.
 
-That collapse has since been root-caused to a llama.cpp flash-attention kernel
-heuristic tuned on Ada and applied unchanged to Blackwell. A one-line patch in
-[patches/](patches/) restores 2–5× generation throughput past 8192 tokens; build
-with `./scripts/setup-llama.sh --backend rocm-cuda --patches` to include it.
-Full investigation in [../doc/cuda-fa-blackwell.md](../doc/cuda-fa-blackwell.md).
+That collapse traces to the **CUDA toolkit** used to build llama.cpp, not to
+llama.cpp itself: a CUDA 12.x build of the same commit does not have it, ours
+with CUDA 13.3 does. Prefer Vulkan for the NVIDIA card, or build with CUDA 12.x
+where the glibc version allows it. The patch in [patches/](patches/) helps this
+build by 3.3-4.2x (`--patches`) but treats a symptom. Full investigation in
+[../doc/cuda-fa-blackwell.md](../doc/cuda-fa-blackwell.md).
+
+### Prebuilt binaries
+
+Upstream ships **no Linux CUDA build** - only Windows gets one - so the CUDA
+backend must be compiled locally. Ubuntu 26.04 packages llama.cpp but its
+`libggml0-backend-*` set is BLAS/HIP/Vulkan only, with no CUDA, because the
+toolkit is not redistributable under DFSG.
+
+For the other backends prebuilt binaries do exist and are equivalent to ours:
+upstream's `llama-b10331-bin-ubuntu-vulkan-x64` matches this repo's Vulkan build
+within 1-2% on both GPUs, and there is a `ubuntu-rocm-7.2-x64` asset too.
 
 Still unmeasured: a model too large for one card, `--tensor-split` tuning,
 depths beyond 32k, quantized KV cache, and concurrent load
