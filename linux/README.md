@@ -43,6 +43,7 @@ Everything after `--` goes to `llama-server` untouched — the equivalent of
 | `start-deepseek-mxfp4-cuda-only.sh` | The same, NVIDIA-only — fault-immune profile the systemd fallback service runs | — |
 | `start-deepseek-nvidia.sh`  | DeepSeek V4 Flash entirely on the NVIDIA card (antirez IQ2XXS+Q8-attn/128k; `--iq2m`, `--200k`, `--iq3*`) | — |
 | `start-deepseek-nvidia-amd.sh` | DeepSeek V4 Flash entirely in VRAM across both cards (Q2_K_XL, 200k) | — |
+| `start-step37.sh`           | Step-3.7-Flash Q4_K_S — 104 GB across both cards' VRAM, the true dual-GPU case | — |
 | `start-gptoss.sh`           | gpt-oss-120b MXFP4, CUDA-only — fastest model on the rig (258 t/s) | — |
 | `build-cuda12-container.sh` | CUDA backend built with CUDA 12.8 in Docker; merges into a dual runtime | — |
 

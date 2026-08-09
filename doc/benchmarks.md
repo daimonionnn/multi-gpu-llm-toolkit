@@ -463,3 +463,34 @@ Native-MXFP4 MoE (60 GB, 128 experts / 4 active), fits the NVIDIA card whole:
 The dual row is the stability experiment above, not a recommendation — with
 the model fitting one card, adding the AMD card costs 3x. CUDA-only gpt-oss
 is the speed king of this machine by a wide margin.
+
+### Step-3.7-Flash — the model dual-GPU actually exists for
+
+`step35` arch, 45 layers, 288 experts / 8 active. stepfun-ai Q4_K_S is
+**104 GB**: too big for the 96.6 GB NVIDIA card, comfortable inside 96.6 +
+32.6 GB of combined VRAM with **no CPU offload at all**. Layout: all layers,
+KV and attention on CUDA0 (`-ts 0,1`), experts of 10 layers (~24 GB) on the
+AMD card. Context 65536.
+
+| Measurement | pp | tg |
+|---|---:|---:|
+| 4k / 16k bench | 2194 / 2441 | 89.2 / 85.1 |
+| 6 × 64k probes (clears between) | 2074–2143 | 77.6–78.3 |
+
+**384,000 prefill tokens through the AMD expert path, zero faults**, with
+throughput flat to the last decimal — the `step35` arch is unaffected by the
+`deepseek4` HIP bug, as the gpt-oss result predicted.
+
+Two things worth noting. First, 78–94 tg on a 104 GB model beats DeepSeek's
+80 GB all-VRAM 2-bit pick (74.5 tg): with 8 of 288 experts active, Step-3.7
+reads less per token than its file size suggests, so MoE sparsity matters
+more than model size. Second, this is the first configuration in the project
+where the AMD card is **load-bearing rather than optional** — remove it and
+the model does not run at this speed at all.
+
+Profile: `start-step37.sh` (`--128k` shifts one more expert layer to AMD).
+
+> **Trap:** unsloth's `UD-Q4_K_XL-R4` (114 GB) will not load in mainline
+> llama.cpp — `tensor 'blk.3.ffn_down_exps.weight' has invalid ggml type 213`.
+> The `-R4` row-interleaved repack is an **ik_llama.cpp** extension. Use the
+> stepfun-ai Q4_K_S for mainline.
