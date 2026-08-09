@@ -4,8 +4,10 @@
 # Budget: ~96.6 GB NVIDIA (all layers, KV, attention) + ~27 GB AMD (expert
 # weights of 13 layers) = weights up to ~110 GB with 200k context.
 #
-#   Q2_K_XL  90.2 GB  <- default: the only quant that fits AND is stable on
-#                        the AMD card (k-quant; the HIP fault hits IQ quants)
+#   Q2_K_XL  90.2 GB  <- default: the only quant that fits AND has the lower
+#                        fault rate on the AMD card (the HIP fault is
+#                        probabilistic on all quants - IQ quants fail fast,
+#                        non-IQ rarely but not never; see benchmarks.md)
 #   IQ3_XXS  97.1 GB  <- --iq3: better quality, fits, measured 57 t/s - but
 #                        UNSTABLE: HIP IQ-kernels fault intermittently
 #
