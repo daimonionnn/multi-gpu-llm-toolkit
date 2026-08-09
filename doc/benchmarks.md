@@ -293,6 +293,18 @@ CUDA-only remains the choice. For the larger quants that cannot fit, the
 expert-offload dual beats CPU offload by ~1.5–1.9x on prefill and ~1.3–1.5x on
 generation, and is stable on non-IQ quants.
 
+**Quality ranking is inverted for this model.** DS4 Flash is
+quantization-aware-trained: the routed experts (96% of the model) ship
+natively in MXFP4 at ~4.25 bpw, the rest in FP8/BF16. The MXFP4 GGUF repacks
+those experts bit-for-bit and is therefore **lossless** — the reference, not a
+quantization. Q8_K_XL re-encodes the same FP4 values into a wider format
+(more bytes, zero added information) and is dominated by MXFP4 on every axis
+here: equal-at-best quality, slightly slower, 5 GB larger. Q4_K_XL re-encodes
+the FP4 grid into a different 4-bit grid, which is lossy, and quantizes the
+non-expert tensors harder — the only one of the three below the reference.
+IQ3_XXS sits lowest; QAT models lose accuracy faster than BF16-trained ones
+once experts drop below ~3 bpw.
+
 **Related: [antirez/ds4](https://github.com/antirez/ds4)** (DwarfStar) is a
 dedicated DeepSeek V4 engine with Metal/CUDA/ROCm backends. Evaluated
 2026-08-09: it does not help with this fault — different engine, its ROCm
