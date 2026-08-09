@@ -164,6 +164,11 @@ backend collapses as context grows** — at 32k depth it retains 9% of prompt an
 The CUDA backend also aborts outright with `-fa off` (`CUDA error: invalid
 argument`) at every depth, so it is flash-attention-only here.
 
+That collapse has since been root-caused to a llama.cpp flash-attention kernel
+heuristic tuned on Ada and applied unchanged to Blackwell. A one-line patch in
+[patches/](patches/) restores 2–5× generation throughput past 8192 tokens — full
+investigation in [../doc/cuda-fa-blackwell.md](../doc/cuda-fa-blackwell.md).
+
 Still unmeasured: a model too large for one card, `--tensor-split` tuning,
 depths beyond 32k, quantized KV cache, and concurrent load
 (`benchmark-loaded-model.sh` has only been exercised against a mock server).

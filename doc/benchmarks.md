@@ -137,11 +137,20 @@ directly comparable with the `-fa auto` table above.
 generation. Every configuration containing CUDA inherits the collapse:
 `rocm-cuda` and `vulkan-cuda` track the CUDA curve almost exactly.
 
-**It is the backend, not the card, and not the model.** Vulkan on the *same*
-RTX PRO 6000 retains 41% / 90% and is 4.6× faster at pp and 4.3× faster at tg by
-32k. Re-checked at d=16384 on an unrelated model (Qwopus3.6-27B-v2 Q8_0):
-CUDA 390.8 pp / 20.0 tg versus Vulkan 1355.5 pp / 50.1 tg on that same card —
-the same 3.5× gap.
+**It is the backend, not the card.** Vulkan on the *same* RTX PRO 6000 retains
+41% / 90% and is 4.6× faster at pp and 4.3× faster at tg by 32k.
+
+> **Correction.** This section originally also claimed the effect was not
+> model-related, on the strength of a re-check with Qwopus3.6-27B-v2 Q8_0. That
+> was not an independent check — both models are Qwen3.6 derivatives with
+> identical attention geometry (head dim 256, gqa 6). Model independence was
+> established later, with Hermes-4-70B (head dim 128, gqa 8), which collapses
+> even harder. See [cuda-fa-blackwell.md](cuda-fa-blackwell.md).
+
+**Root cause is now known.** The collapse is a llama.cpp flash-attention kernel
+selection heuristic, tuned on Ada and inherited unchanged by Blackwell. It has a
+one-line fix that restores 2–5× throughput. Full investigation:
+**[cuda-fa-blackwell.md](cuda-fa-blackwell.md)**.
 
 **The ranking inverts completely between short and long context.** At depth 0
 `rocm-cuda` is the best dual configuration and `vulkan-vulkan` the weakest at
@@ -175,8 +184,8 @@ Reproduced on both test models. In practice the CUDA backend on this card is
 flash-attention-only, which also means the depth-0 numbers in the first table
 (`-fa auto`) must have had FA enabled — otherwise they would have crashed too.
 
-Not yet investigated: whether this is specific to `sm_120`/Blackwell, to
-CUDA 13.3, or to llama.cpp `7ba604f`.
+Investigated — see [cuda-fa-blackwell.md](cuda-fa-blackwell.md). It is llama.cpp
+code, not the CUDA toolkit and not a hardware fault.
 
 ### Not yet measured
 

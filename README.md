@@ -55,6 +55,7 @@ These apply across platforms and are the reason both live in one repo:
 - **[doc/benchmarks.md](doc/benchmarks.md)** — results, keyed by rig and backend, plus what the metrics actually mean
 - **[doc/rocm-bugs.md](doc/rocm-bugs.md)** — ROCm/HIP memory bugs, with a per-bug matrix of which hardware and OS each one affects
 - **[doc/cuda-glibc-243.md](doc/cuda-glibc-243.md)** — why the distro CUDA 13.1 cannot build on Ubuntu 26.04, and how to fix it
+- **[doc/cuda-fa-blackwell.md](doc/cuda-fa-blackwell.md)** — CUDA token generation collapses at 8192 context on Blackwell: cause, measurements, and a one-line fix
 
 ## Repository layout
 
@@ -81,6 +82,8 @@ These apply across platforms and are the reason both live in one repo:
 - [x] Linux: all four backends build; `rocm-cuda` runs ROCm and CUDA in one process
 - [x] Linux: benchmark matrix across all seven single/dual configurations
 - [x] Linux: context-depth sweep — found the CUDA backend collapses past ~8k while Vulkan does not
+- [x] Linux: root-caused that collapse to an Ada-tuned FA heuristic applied to Blackwell; local patch restores 2–5×
+- [ ] Report the Blackwell FA heuristic upstream to llama.cpp
 - [ ] Linux: benchmark a model too large for one card — the case dual-GPU exists for
 - [ ] Linux: tune `--tensor-split` (everything so far uses the proportional default)
 - [ ] Linux: tune `--tensor-split` for the 3:1 VRAM asymmetry
