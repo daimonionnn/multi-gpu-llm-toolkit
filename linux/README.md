@@ -155,12 +155,18 @@ compiler check), and `spirv-headers` was missing from the prerequisites.
 
 All seven single- and dual-GPU configurations were then benchmarked with a
 21 GB model — results and analysis in [../doc/benchmarks.md](../doc/benchmarks.md).
-The headline: splitting a model that fits on one card costs 17–33% throughput,
-so dual-GPU is for models that do not fit, not for speed.
+Two headlines: splitting a model that fits on one card costs 17–33% throughput,
+so dual-GPU is for models that do not fit rather than for speed; and **the CUDA
+backend collapses as context grows** — at 32k depth it retains 9% of prompt and
+20% of generation throughput, while Vulkan on the same RTX PRO 6000 retains
+41% / 90%. For long context on this rig, drive the NVIDIA card with Vulkan.
+
+The CUDA backend also aborts outright with `-fa off` (`CUDA error: invalid
+argument`) at every depth, so it is flash-attention-only here.
 
 Still unmeasured: a model too large for one card, `--tensor-split` tuning,
-quantized KV cache, and concurrent load (`benchmark-loaded-model.sh` has only
-been exercised against a mock server).
+depths beyond 32k, quantized KV cache, and concurrent load
+(`benchmark-loaded-model.sh` has only been exercised against a mock server).
 
 One unexplained anomaly: in the `rocm-cuda` runtime CUDA0 reports **more free
 memory than it has in total** (97249 MiB total, 199823 MiB free). The Vulkan

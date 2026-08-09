@@ -96,9 +96,91 @@ prefill.** All three land within 8% on pp512, but tg128 spans 42.7–50.6 —
 `vulkan-vulkan` is the weakest, and pairing either AMD backend with CUDA on the
 NVIDIA side recovers most of the gap.
 
+### Context-depth sweep
+
+Same model and rig, re-measured across KV-cache depth with `-d 0,4096,16384,32768`,
+`-fa on` for every backend, `-r 2`. Flash attention is forced rather than left on
+`auto` so all backends run the same algorithm — without that the comparison at
+depth is meaningless.
+
+Depth 0 is re-measured here, so this table is internally consistent and is *not*
+directly comparable with the `-fa auto` table above.
+
+**Prompt processing (pp512, t/s)**
+
+| Config | d=0 | d=4096 | d=16384 | d=32768 | retained at 32k |
+|---|---:|---:|---:|---:|---:|
+| cuda (NVIDIA) | 2405.3 | 1035.4 | 380.6 | 205.7 | **9%** |
+| vulkan (NVIDIA) | 2324.1 | 1945.9 | 1308.9 | **941.5** | 41% |
+| vulkan-vulkan (dual) | 1531.9 | 1280.1 | 868.5 | 631.5 | 41% |
+| vulkan (AMD) | 861.9 | 778.3 | 615.4 | 494.0 | 57% |
+| rocm (AMD) | 746.0 | 669.6 | 530.7 | 418.8 | 56% |
+| rocm-cuda (dual) | 1649.4 | 903.5 | 381.6 | 216.2 | 13% |
+| vulkan-cuda (dual) | 1514.5 | 784.8 | 317.7 | 178.2 | 12% |
+
+**Token generation (tg128, t/s)**
+
+| Config | d=0 | d=4096 | d=16384 | d=32768 | retained at 32k |
+|---|---:|---:|---:|---:|---:|
+| vulkan (NVIDIA) | 61.2 | 60.2 | 58.0 | **55.3** | 90% |
+| vulkan-vulkan (dual) | 42.8 | 42.1 | 40.3 | 37.2 | 87% |
+| vulkan (AMD) | 25.4 | 25.0 | 24.1 | 23.1 | 91% |
+| rocm (AMD) | 24.2 | 24.0 | 23.3 | 22.3 | 92% |
+| rocm-cuda (dual) | 50.6 | 49.2 | 21.1 | 13.4 | 26% |
+| cuda (NVIDIA) | 64.7 | 62.4 | 21.3 | 12.9 | **20%** |
+| vulkan-cuda (dual) | 49.6 | 47.4 | 19.4 | 12.1 | 24% |
+
+### What the sweep says
+
+**The CUDA backend collapses with context depth on this GPU.** It leads at depth
+0 and finishes last at 32k, retaining 9% of prompt throughput and 20% of
+generation. Every configuration containing CUDA inherits the collapse:
+`rocm-cuda` and `vulkan-cuda` track the CUDA curve almost exactly.
+
+**It is the backend, not the card, and not the model.** Vulkan on the *same*
+RTX PRO 6000 retains 41% / 90% and is 4.6× faster at pp and 4.3× faster at tg by
+32k. Re-checked at d=16384 on an unrelated model (Qwopus3.6-27B-v2 Q8_0):
+CUDA 390.8 pp / 20.0 tg versus Vulkan 1355.5 pp / 50.1 tg on that same card —
+the same 3.5× gap.
+
+**The ranking inverts completely between short and long context.** At depth 0
+`rocm-cuda` is the best dual configuration and `vulkan-vulkan` the weakest at
+generation. At 32k `vulkan-vulkan` (631.5 pp / 37.2 tg) beats `rocm-cuda`
+(216.2 / 13.4) by roughly 3×. Any backend choice made on depth-0 numbers is the
+wrong choice for long-context work.
+
+**On the AMD card, ROCm does not overtake Vulkan at depth.** This was the
+hypothesis being tested and it does not hold: RADV stays ahead at every depth
+(494.0 vs 418.8 pp and 23.1 vs 22.3 tg at 32k). What is true is that the *AMD
+path as a whole* becomes competitive — at 32k the 32 GB R9700 under ROCm
+generates at 22.3 t/s against 12.9 t/s for the 96 GB RTX PRO 6000 under CUDA.
+The cheaper card wins at long context, because the expensive one is running a
+backend that falls apart there.
+
+**Practical rule for long context on this rig:** drive the NVIDIA card with
+Vulkan, not CUDA. `vulkan-vulkan` is the best dual configuration beyond ~8k, and
+single-GPU `vulkan` on the RTX PRO 6000 is the best configuration overall
+whenever the model fits.
+
+### Bug: the CUDA backend cannot run with flash attention disabled
+
+`-fa off` aborts immediately on the CUDA backend, at every depth including 0:
+
+```
+CUDA error: invalid argument
+  current device: 0, in function ggml_cuda_compute_forward at ggml-cuda.cu:2374
+```
+
+Reproduced on both test models. In practice the CUDA backend on this card is
+flash-attention-only, which also means the depth-0 numbers in the first table
+(`-fa auto`) must have had FA enabled — otherwise they would have crashed too.
+
+Not yet investigated: whether this is specific to `sm_120`/Blackwell, to
+CUDA 13.3, or to llama.cpp `7ba604f`.
+
 ### Not yet measured
 
 - A model too large for one card — the case dual-GPU actually exists for.
 - `--tensor-split` tuning; everything above uses the proportional default.
-- Quantized KV cache, larger contexts, and concurrent requests
+- Depths beyond 32k, quantized KV cache, and concurrent requests
   (`benchmark-loaded-model.sh` has not been run against a real model).
