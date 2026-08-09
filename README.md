@@ -6,6 +6,24 @@ Most multi-GPU llama.cpp setups assume one vendor. This repo documents what actu
 
 Both Windows and Linux are covered, on different test machines.
 
+> ### Read this if you have a Blackwell NVIDIA GPU
+>
+> On stock llama.cpp, the **CUDA backend loses 50-80% of its token-generation
+> speed the moment the context passes 8192 tokens**. Measured on an RTX PRO 6000
+> (sm_120): 72 -> 35 t/s in one step for a 27B model, 32 -> 9 t/s for a 70B one.
+> The GPU sits at ~210 W instead of ~410 W. It is not a hardware fault and not
+> your driver.
+>
+> The cause is a flash-attention kernel heuristic tuned on RTX 4000 / Ada and
+> applied unchanged to Blackwell. Two ways around it:
+>
+> - build with `./scripts/setup-llama.sh --backend rocm-cuda --patches` (one-line
+>   fix shipped in [linux/patches/](linux/patches/), restores 2-5x), or
+> - drive the NVIDIA card with **Vulkan** instead of CUDA, which is unaffected
+>   and costs only ~3% at short context.
+>
+> Full analysis, measurements and reproduction: **[doc/cuda-fa-blackwell.md](doc/cuda-fa-blackwell.md)**.
+
 ## Pick your platform
 
 | Platform                | Status                        | Scripts    | Start here                             |
