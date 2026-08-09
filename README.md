@@ -79,7 +79,9 @@ These apply across platforms and are the reason both live in one repo:
 - [x] Linux: confirmed ROCm supports the R9700 natively as `gfx1201` — no `HSA_OVERRIDE_GFX_VERSION` needed
 - [x] Linux: confirmed the APU/UMA bugs cannot occur on discrete cards (matrix in `doc/rocm-bugs.md`)
 - [x] Linux: all four backends build; `rocm-cuda` runs ROCm and CUDA in one process
-- [ ] Linux: load a model — nothing has been benchmarked yet
+- [x] Linux: first benchmark matrix across all seven single/dual configurations
+- [ ] Linux: benchmark a model too large for one card — the case dual-GPU exists for
+- [ ] Linux: tune `--tensor-split` (everything so far uses the proportional default)
 - [ ] Linux: tune `--tensor-split` for the 3:1 VRAM asymmetry
 - [ ] Benchmarks for each rig
 - [ ] Stand up the `halo-linux` rig for a real same-hardware OS comparison

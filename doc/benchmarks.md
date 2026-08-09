@@ -52,13 +52,53 @@ Pending. To be measured across:
 
 ## Results: `dual-linux` (Radeon AI PRO R9700 + RTX PRO 6000, Linux)
 
-Pending. All four backends build and both GPUs enumerate, but no model has been
-loaded yet.
+**Model:** Qwen3.6-27B-uncensored-heretic-v2 i1-Q6_K (21 GB) — chosen because it
+fits entirely on either card alone, so single-GPU and dual-GPU are directly
+comparable.
+**Tool:** `llama-bench`, `-p 512 -n 128 -r 3`, defaults otherwise (flash-attn
+auto, f16 KV, layer split, proportional tensor split).
+**Build:** llama.cpp `7ba604f`, CUDA 13.3, ROCm 7.1, RADV. Measured 2026-08-09.
 
-Note the 3:1 VRAM asymmetry (96 GB NVIDIA vs 32 GB AMD): an even
-`--tensor-split 1,1` leaves most of the RTX PRO 6000 idle, so the split column
-matters more here than on `halo-win`.
+| Config | Backend / devices | pp512 (t/s) | vs CUDA | tg128 (t/s) | vs CUDA |
+|---|---|---:|---:|---:|---:|
+| **cuda** | CUDA0 (NVIDIA alone) | **2232.6** ±28.5 | 100% | **61.17** ±0.06 | 100% |
+| vulkan (NVIDIA) | Vulkan1 (NVIDIA alone) | 2168.5 ±11.0 | 97% | 59.47 ±0.20 | 97% |
+| rocm-cuda | ROCm0 + CUDA0 | 1635.6 ±35.9 | 73% | 50.58 ±0.05 | 83% |
+| vulkan-vulkan | Vulkan2 + Vulkan1 | 1514.2 ±6.8 | 68% | 42.66 ±0.14 | 70% |
+| vulkan-cuda | Vulkan2 + CUDA0 | 1506.3 ±41.8 | 67% | 49.56 ±0.07 | 81% |
+| vulkan (AMD) | Vulkan2 (AMD alone) | 869.9 ±1.2 | 39% | 25.37 ±0.01 | 41% |
+| rocm (AMD) | ROCm0 (AMD alone) | 743.5 ±7.0 | 33% | 24.18 ±0.02 | 40% |
 
-| Model | Quant | Backend | Context | Tensor split | GenTok/s | TotalTok/s |
-|-------|-------|---------|---------|--------------|---------:|-----------:|
-| —     | —     | —       | —       | —            | —        | —          |
+### What this says
+
+**Splitting a model that fits on one card makes it slower, not faster.** The
+best dual configuration (`rocm-cuda`) reaches 73% of prompt throughput and 83%
+of generation throughput of the RTX PRO 6000 on its own. This is inherent to
+layer splitting: only one GPU computes at a time while the other waits, and
+activations cross PCIe at every boundary. Adding the slower card drags the
+average toward it.
+
+The practical rule for this rig: **use dual-GPU only when the model does not fit
+in 96 GB.** Below that, single-GPU CUDA wins on every axis. Above it, dual is
+the only option and the comparison stops mattering.
+
+**Vulkan on NVIDIA costs almost nothing** — 97% of CUDA on both metrics. If a
+CUDA toolchain is unavailable (see [cuda-glibc-243.md](cuda-glibc-243.md)),
+`vulkan` is a near-free substitute on this card.
+
+**Vulkan beats ROCm on the R9700.** RADV is 17% faster at prompt processing
+(869.9 vs 743.5) and 5% faster at generation. On gfx1201 the ROCm backend is not
+the fast path, which inverts the assumption carried over from `halo-win`, where
+ROCm is the performance option and Vulkan the safe fallback.
+
+**Among dual configurations the backend matters more for generation than for
+prefill.** All three land within 8% on pp512, but tg128 spans 42.7–50.6 —
+`vulkan-vulkan` is the weakest, and pairing either AMD backend with CUDA on the
+NVIDIA side recovers most of the gap.
+
+### Not yet measured
+
+- A model too large for one card — the case dual-GPU actually exists for.
+- `--tensor-split` tuning; everything above uses the proportional default.
+- Quantized KV cache, larger contexts, and concurrent requests
+  (`benchmark-loaded-model.sh` has not been run against a real model).

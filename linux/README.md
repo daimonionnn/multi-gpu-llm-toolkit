@@ -6,8 +6,9 @@ RTX PRO 6000 Blackwell (96 GB, sm_120) on Ubuntu 26.04.
 
 > **Status:** all scripts ported from the [Windows implementation](../windows/README.md)
 > and exercised on the real machine. **All four backends build**, and
-> `rocm-cuda` enumerates ROCm and CUDA together in a single process. Nothing is
-> benchmarked yet — no model has been loaded.
+> `rocm-cuda` enumerates ROCm and CUDA together in a single process. A first
+> benchmark matrix across all seven single- and dual-GPU configurations is in
+> [../doc/benchmarks.md](../doc/benchmarks.md).
 
 ## Quick start
 
@@ -152,12 +153,18 @@ each backend), `ROCM_PATH` was being exported as `/usr` on the distro layout
 (which makes clang look for device bitcode in `/usr/amdgcn/bitcode` and fail the
 compiler check), and `spirv-headers` was missing from the prerequisites.
 
-Still unverified: **no model has ever been loaded.** Every result above is
-build- and enumeration-level. Nothing in
-[../doc/benchmarks.md](../doc/benchmarks.md) has been measured, `--tensor-split`
-is untuned, and the backends have not been run under memory pressure.
+All seven single- and dual-GPU configurations were then benchmarked with a
+21 GB model — results and analysis in [../doc/benchmarks.md](../doc/benchmarks.md).
+The headline: splitting a model that fits on one card costs 17–33% throughput,
+so dual-GPU is for models that do not fit, not for speed.
 
-One anomaly to watch when the first model is loaded: in the `rocm-cuda` runtime,
-CUDA0 reports **more free memory than it has in total** (97249 MiB total,
-199755 MiB free). llama.cpp sizes `--fit` decisions from free VRAM, so this
-could plausibly lead it to over-commit the NVIDIA card. Unexplained so far.
+Still unmeasured: a model too large for one card, `--tensor-split` tuning,
+quantized KV cache, and concurrent load (`benchmark-loaded-model.sh` has only
+been exercised against a mock server).
+
+One unexplained anomaly: in the `rocm-cuda` runtime CUDA0 reports **more free
+memory than it has in total** (97249 MiB total, 199823 MiB free). The Vulkan
+backend reports the same card sanely (96653 of 97887), so it is specific to the
+CUDA backend's reporting. llama.cpp sizes `--fit` from free VRAM, so this needs
+explaining before trusting automatic placement on a model that nearly fills the
+card.
