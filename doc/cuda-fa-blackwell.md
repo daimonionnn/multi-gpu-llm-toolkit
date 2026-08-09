@@ -1,12 +1,15 @@
 # CUDA token generation collapses at 8192 context on Blackwell (sm_120)
 
-> ### Status: cause narrowed to the CUDA toolkit, not the heuristic
+> ### Status: RESOLVED - proven to be the CUDA toolkit, with a working fix
 >
-> The original conclusion below - that llama.cpp's Ada-tuned flash-attention
-> heuristic is at fault - **did not survive checking** and is retained only as a
-> record of the reasoning. See [What it actually is](#what-it-actually-is).
+> Building the identical llama.cpp commit with **CUDA 12.8 instead of 13.3**
+> removes the collapse entirely - same source, same flags, same machine, same
+> driver. `linux/scripts/build-cuda12-container.sh` automates that build and
+> assembles a dual-vendor runtime around it. Details in
+> [What it actually is](#what-it-actually-is).
 >
-> The measurements are all valid. The explanation was wrong.
+> The original heuristic-based explanation below is retained as a record of the
+> reasoning; the heuristic itself turned out to be *correct* on a healthy build.
 
 ## Symptom
 
@@ -194,27 +197,63 @@ That last row matters most: this repo builds llama.cpp correctly. Our Vulkan
 binary matches upstream's own release of the identical commit (2663 vs 2646
 pp512 on NVIDIA, 1020 vs 1007 on AMD).
 
-**The only remaining difference is the CUDA toolkit.** We build with CUDA 13.3;
-LM Studio's build reports `built with GNU 12.3.0`, i.e. a CUDA 12.x toolchain.
+**The remaining difference was the CUDA toolkit, and that is now proven
+directly.** CUDA 12.x cannot be compiled on a glibc 2.43 host, but it can be in
+an Ubuntu 22.04 container. Building the identical commit (`7ba604f`), stock and
+unpatched, with the same CMake flags, CUDA 12.8, run on the same host driver:
 
-This is circumstantial - strong elimination, no direct proof - and it cannot be
-closed on this machine:
+| Depth | CUDA 13.3 build (tg128) | CUDA 12.8 build (tg128) |
+|---:|---:|---:|
+| 7168 | 71.9 | 74.9 |
+| 8192 | **34.7** | **74.6** |
+| 12288 | 27.4 | 73.8 |
+| 32768 | ~13 | **69.6** |
 
-- CUDA 12.x cannot compile here at all, for the glibc 2.43 reason in
-  [cuda-glibc-243.md](cuda-glibc-243.md). It is older than 13.1, which already
-  fails.
-- NVIDIA's `ubuntu2604` repository carries only 13.x.
-- Swapping LM Studio's `libggml-cuda.so` into our runtime fails: the backend
-  will not load across a 79-commit ABI gap.
+No cliff. And 69.6 t/s at 32k beats both Vulkan on the same card (65) and the
+patched 13.3 build (~56) - meaning **the MMA heuristic was right all along**;
+the MMA path genuinely is the fastest on Blackwell when the build is healthy.
+CUDA 13.3 ruins it at runtime.
 
-### What to do about it
+Two supporting facts pin the damage to the host side rather than codegen:
 
-- **Use Vulkan for the NVIDIA card.** It is unaffected, costs ~3% at short
-  context, and is faster than patched CUDA past ~8k anyway.
-- **Or use a CUDA 12.x-built binary**, such as the one LM Studio ships.
-- The patch in `linux/patches/` still helps *this* build by 3.3-4.2x and its
-  measurements stand, but it treats a symptom of the toolchain rather than a
-  bug in llama.cpp. Do not report it upstream.
+- The SASS of the exact kernel instantiation is **identical** between the 13.3
+  and 12.x builds - ~56k instructions with matching histograms.
+- The FA decode path sizes its launch grid via
+  `cudaOccupancyMaxActiveBlocksPerMultiprocessor` (see upstream
+  [#12182](https://github.com/ggml-org/llama.cpp/issues/12182) /
+  [#12183](https://github.com/ggml-org/llama.cpp/pull/12183)) - a runtime API,
+  exactly the kind of thing that can differ between toolkit majors with the
+  same device code. Which runtime call misbehaves has not been isolated.
+
+This is also consistent with what others report:
+[NVIDIA's migration guide recommends CUDA 12.8 for sm_120](https://zenn.dev/toki_mwc/articles/rtx5090-blackwell-cuda-toolkit-trap-llama-cpp?locale=en)
+llama.cpp builds, and that article documents a separate 5-6x CUDA 13.1 penalty
+on RTX 5090 through a different mechanism (MMQ segfault forcing cuBLAS).
+
+### The fix
+
+`linux/scripts/build-cuda12-container.sh` builds the CUDA backend with
+CUDA 12.8 inside a container (no glibc conflict there), bundles the CUDA 12
+runtime libraries, and - because both sides are the same commit built with
+`GGML_BACKEND_DL` - merges it with the locally built HIP backend into
+`runtime-rocm-cuda128/`, a dual-vendor runtime with fast CUDA.
+
+Measured on that mixed dual runtime (`ROCm0/CUDA0`, same model):
+
+| Depth | Stock 13.3 dual | Patched 13.3 dual | Mixed 12.8 dual |
+|---:|---:|---:|---:|
+| tg128 @ 32768 | 14 | 46 | **46.8** |
+| pp512 @ 32768 | 222 | 222 | **1310** |
+
+Generation matches the patched build (the AMD card is the bottleneck in dual),
+but prompt processing at depth improves **6x** - the patch never helped prefill,
+the healthy MMA kernel does. One caveat: at depth 0 the mixed dual measured
+51.4 tg vs 59 for the pure 13.3 build (single run, unexplained; possibly mixing
+overhead).
+
+The patch in `linux/patches/` is superseded by this. It remains useful only
+where a container build is not an option, and must not go upstream - the
+heuristic it bypasses is correct.
 
 ## Related upstream reports
 

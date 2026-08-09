@@ -14,18 +14,20 @@ Both Windows and Linux are covered, on different test machines.
 > The GPU sits at ~210 W instead of ~410 W. It is not a hardware fault and not
 > your driver.
 >
-> The cause is **the CUDA toolkit used to build llama.cpp**, not llama.cpp
-> itself and not your hardware: a CUDA 12.x build of the same commit (the one
-> LM Studio ships) does not have the problem, while our CUDA 13.3 build does.
-> There is no official Linux CUDA binary from upstream, so anyone on Linux is
-> building their own and can hit this. Options:
+> The cause is **proven to be the CUDA toolkit used to build llama.cpp** - not
+> llama.cpp itself and not your hardware. The identical commit built with
+> CUDA 12.8 shows no collapse (74.6 t/s at 8k where the 13.3 build drops to
+> 34.7) and is the fastest option at every depth. There is no official Linux
+> CUDA binary from upstream, so anyone on Linux builds their own and can hit
+> this. In order of preference:
 >
-> - build with `./scripts/setup-llama.sh --backend rocm-cuda --patches` (one-line
->   fix shipped in [linux/patches/](linux/patches/); measured 3.3-4.2x recovery
->   at 32k on every CUDA configuration), or
-> - drive the NVIDIA card with **Vulkan** instead of CUDA, which is unaffected,
->   costs only ~3% at short context and is faster than patched CUDA past ~8k, or
-> - use a binary built with CUDA 12.x, such as LM Studio's.
+> - build the CUDA backend with **CUDA 12.8 in a container**:
+>   `./scripts/build-cuda12-container.sh` does it and assembles a dual-vendor
+>   runtime (`runtime-rocm-cuda128/`) around it, or
+> - drive the NVIDIA card with **Vulkan** instead of CUDA (unaffected, ~3% cost
+>   at short context), or
+> - as a last resort `--patches` ([linux/patches/](linux/patches/)) recovers
+>   3.3-4.2x generation on a CUDA 13.3 build, but not prefill.
 >
 > Full analysis, measurements and reproduction: **[doc/cuda-fa-blackwell.md](doc/cuda-fa-blackwell.md)**.
 

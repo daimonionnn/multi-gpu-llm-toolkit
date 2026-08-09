@@ -39,6 +39,7 @@ Everything after `--` goes to `llama-server` untouched — the equivalent of
 | `benchmark-loaded-model.sh` | End-to-end HTTP benchmark against a running server | `benchmark-loaded-model.ps1`  |
 | `start-open-webui.sh`       | Open WebUI frontend via Docker                     | `start-open-webui.ps1`        |
 | `start-model-template.sh`   | Model profile template — copy per model            | `start-qwen122b-q6k.ps1` etc. |
+| `build-cuda12-container.sh` | CUDA backend built with CUDA 12.8 in Docker; merges into a dual runtime | — |
 
 Backend modes match Windows — with `.so` backends in place of `.dll`, plus one
 addition. `setup-llama.sh` accepts a **`rocm`** backend that the PowerShell
@@ -164,12 +165,13 @@ backend collapses as context grows** — at 32k depth it retains 9% of prompt an
 The CUDA backend also aborts outright with `-fa off` (`CUDA error: invalid
 argument`) at every depth, so it is flash-attention-only here.
 
-That collapse traces to the **CUDA toolkit** used to build llama.cpp, not to
-llama.cpp itself: a CUDA 12.x build of the same commit does not have it, ours
-with CUDA 13.3 does. Prefer Vulkan for the NVIDIA card, or build with CUDA 12.x
-where the glibc version allows it. The patch in [patches/](patches/) helps this
-build by 3.3-4.2x (`--patches`) but treats a symptom. Full investigation in
-[../doc/cuda-fa-blackwell.md](../doc/cuda-fa-blackwell.md).
+That collapse is **proven** to come from the CUDA toolkit used to build
+llama.cpp: the identical commit built with CUDA 12.8 (in a container - the host
+glibc forbids it natively) has no cliff and is the fastest configuration at
+every depth. `./scripts/build-cuda12-container.sh` automates it and produces
+`runtime-rocm-cuda128/`, a dual-vendor runtime with the fast CUDA backend.
+The patch in [patches/](patches/) is superseded and kept only as a fallback.
+Full investigation in [../doc/cuda-fa-blackwell.md](../doc/cuda-fa-blackwell.md).
 
 ### Prebuilt binaries
 
