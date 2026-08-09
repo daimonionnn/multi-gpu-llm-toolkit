@@ -208,3 +208,44 @@ code, not the CUDA toolkit and not a hardware fault.
 - `--tensor-split` tuning; everything above uses the proportional default.
 - Depths beyond 32k, quantized KV cache, and concurrent requests
   (`benchmark-loaded-model.sh` has not been run against a real model).
+
+## Results: `dual-linux` — DeepSeek V4 Flash (the model dual-GPU exists for)
+
+DeepSeek V4 Flash 0731 UD-IQ3_XXS: 98 GB of weights, 43 layers, 256 experts,
+MLA attention. MLA compresses the KV cache to ~50 KB/token across all layers,
+so even 256k context is only ~13 GB — the whole thing fits in 96 + 32 GB with
+room to spare, and the KV is preallocated so a filling context cannot OOM.
+
+Measured over HTTP (single request, 128 predicted tokens, CUDA 12.8 runtimes):
+
+| Config | metric | 4k | 16k | 61–65k | 130k |
+|---|---|---:|---:|---:|---:|
+| rocm-cuda dual | pp t/s | 1106 | 909 | 636 | 417 |
+| cuda + n-cpu-moe 8 | pp t/s | 936 | 986 | **876** | **766** |
+| rocm-cuda dual | tg t/s | **45.3** | **42.9** | **38.2** | **32.9** |
+| cuda + n-cpu-moe 8 | tg t/s | 29.3 | 29.7 | 27.7 | 25.9 |
+
+Two different winners: the dual generates ~1.4x faster (weights stream from two
+memory buses), but CUDA-only wins prefill beyond ~16k — in dual layer-split the
+fast card waits for the slow one on every step, and prefill is where that hurts.
+
+### Stability: the dual mode is currently broken for this model
+
+The DSV4-specific KV-cache code (`llama_kv_cache_dsv4`, days old in llama.cpp)
+faults intermittently on the ROCm backend (gfx1201):
+
+- `HSA_STATUS_ERROR_MEMORY_FAULT` mid-prefill at ~43k tokens (fresh cache,
+  `-c 98304`) — yet a full 130k prefill passed at `-c 131072`, so the fault is
+  intermittent, not a size threshold.
+- Crash in the first decode after clearing a full ~130k cache
+  (`llama_kv_cache_dsv4::clear_compressed` → next `decode()` faults).
+- The Vulkan backend is no refuge: `vk::ErrorDeviceLost` ~20k tokens into
+  prefill with a 256k allocation, and MoE generation is only ~19 t/s on RADV.
+
+CUDA-only passed the exact scenarios that kill ROCm: two consecutive 130k
+prefills with a full-cache clear between them, plus the 4k–65k sweep, no
+faults. `start-deepseek-v4-flash.sh` therefore defaults to CUDA-only with
+`--n-cpu-moe 8` (88 GB on the card, experts of 8 layers in RAM) and keeps the
+dual behind a `--dual` flag with a warning. None of this indicts dual-vendor
+as such — Qwen and Hermes run the same dual runtimes without a hiccup; it is
+an upstream bug in brand-new model support, worth retesting after updates.

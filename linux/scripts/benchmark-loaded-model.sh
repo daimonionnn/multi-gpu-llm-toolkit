@@ -76,15 +76,35 @@ info "Parallel:  up to $MAX_PARALLEL concurrent request(s)"
 echo
 
 # ── Helpers ────────────────────────────────────────────────────────────
-# Token count via the server's own tokenizer, falling back to a chars/4 estimate.
+# Token count via the server's own tokenizer. Large texts are tokenized in
+# chunks - a single multi-MB /tokenize body can 500 on some servers, and the
+# chars/4 fallback once overshot a 262k-context prompt to 283k tokens, which
+# is worse than failing. The fallback stays only for small chunks, deflated so
+# an estimate can never overshoot the target.
+# The chunk goes to jq via --rawfile, never as an argv element: Linux caps a
+# single argv string at 128 KiB (MAX_ARG_STRLEN), so `--arg c "$big"` dies with
+# E2BIG, the pipe to curl goes empty, and the server logs a confusing
+# "attempting to parse an empty input" 500. That failure mode produced a 283k-
+# token prompt against a 262k context once; hence also the conservative
+# fallback that can only stop prompt growth early, never overshoot it.
 token_count() {
-    local text="$1" resp n
-    resp="$(jq -nc --arg c "$text" '{content:$c}' \
-            | curl -fsS --max-time 120 -H 'Content-Type: application/json' \
-                   -d @- "$BASE_URL/tokenize" 2>/dev/null || true)"
-    n="$(jq -r 'if type=="array" then length else (.tokens|length) end' <<< "$resp" 2>/dev/null || true)"
-    [[ "$n" =~ ^[0-9]+$ ]] && { echo "$n"; return; }
-    echo $(( (${#text} + 3) / 4 ))
+    local text="$1" total=0 off=0 resp n
+    local CHUNK=262144
+    while (( off < ${#text} )); do
+        printf '%s' "${text:off:CHUNK}" > "$WORK_DIR/tok_chunk.txt"
+        resp="$(jq -nc --rawfile c "$WORK_DIR/tok_chunk.txt" '{content:$c}' \
+                | curl -fsS --max-time 120 -H 'Content-Type: application/json' \
+                       -d @- "$BASE_URL/tokenize" 2>/dev/null || true)"
+        n="$(jq -r 'if type=="array" then length else (.tokens|length) end' <<< "$resp" 2>/dev/null || true)"
+        if [[ "$n" =~ ^[0-9]+$ ]]; then
+            total=$(( total + n ))
+        else
+            warn "tokenize failed for a $(wc -c < "$WORK_DIR/tok_chunk.txt")-byte chunk; using a stop-early estimate"
+            total=$(( total + CHUNK / 3 ))
+        fi
+        off=$(( off + CHUNK ))
+    done
+    echo "$total"
 }
 
 # Build a prompt of roughly $1 tokens by repeating a fixed chunk.
