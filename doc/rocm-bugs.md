@@ -1,5 +1,28 @@
 # ROCm Bugs Affecting Strix Halo Memory
 
+## Scope: which rig does this apply to?
+
+Every bug documented here was found on **`halo-win`** — an AMD Strix Halo APU
+(gfx1151) with UMA memory, on Windows. They are APU and UMA bugs, not general
+ROCm bugs.
+
+On **`dual-linux`** (discrete Radeon AI PRO R9700, gfx1201, Linux) none of them
+should reproduce, because the preconditions do not exist: no integrated GPU, no
+BIOS UMA split, no WDDM. See [systems.md](systems.md) for both rigs.
+
+| Bug                              | Root cause                       | `halo-win` (APU + Windows)    | `dual-linux` (discrete + Linux) | Why                                          |
+|----------------------------------|----------------------------------|-------------------------------|---------------------------------|----------------------------------------------|
+| **1. `isLargeBar` cap**          | ROCm hardcodes it off for APUs   | Affected — needs binary patch | Not applicable                  | Discrete cards report large-BAR normally     |
+| **2. KV cache spill**            | WDDM + starved GART at 96 GB UMA | Affected at 96 GB UMA         | Not applicable                  | No shared memory pool to spill into          |
+| **3. `hipMallocManaged` broken** | gfx1151-specific                 | Affected                      | Untested — verify on gfx1201    | Different silicon; may or may not carry over |
+
+Bug 3 is the only one worth re-testing on the Linux rig. The Linux-side notes in
+[Workarounds for Linux users](#workarounds-for-linux-users) below were written
+for Strix Halo *on Linux* — they concern TTM kernel parameters for APU memory
+and are likewise irrelevant to a discrete card.
+
+---
+
 > **Note:** The long and chaotic story documented below is specifically regarding the **ROCm driver** and its bugs on Windows.
 > 
 > **Key Takeaway for Backends & BIOS UMA:**
@@ -36,10 +59,10 @@ There are **two independent bugs** that affect HIP memory on Strix Halo. They ha
 
 ## How the two bugs interact
 
-| Bug | Affects | Trigger | Fix |
-|-----|---------|---------|-----|
-| **Bug 1** (isLargeBar) | Max allocation size | Always on (unpatched driver) | Binary patch `amdhip64_7.dll` |
-| **Bug 2** (KV spill) | Memory placement speed | Historically: 96 GB UMA + low OS RAM | Reduce BIOS UMA to 64 GB |
+| Bug                    | Affects                | Trigger                              | Fix                           |
+|------------------------|------------------------|--------------------------------------|-------------------------------|
+| **Bug 1** (isLargeBar) | Max allocation size    | Always on (unpatched driver)         | Binary patch `amdhip64_7.dll` |
+| **Bug 2** (KV spill)   | Memory placement speed | Historically: 96 GB UMA + low OS RAM | Reduce BIOS UMA to 64 GB      |
 
 Historically, at 96 GB UMA, both bugs compounded: Bug 1 capped allocations at ~64 GiB (fixable with patch), but even after fixing Bug 1, Bug 2 still sent KV cache to shared memory (slow). On the current stack, 96 GB UMA is no longer an automatic startup failure on this machine, but 64 GB UMA remains the safer baseline until the performance characteristics are re-benchmarked.
 
@@ -55,18 +78,18 @@ Historically, at 96 GB UMA, both bugs compounded: Bug 1 capped allocations at ~6
 └── 64 GB → Windows OS + applications
 ```
 
-| Property | Value |
-|----------|-------|
-| AMD VRAM | 64 GiB dedicated |
-| NVIDIA VRAM | 32 GiB dedicated (PCIe) |
-| Combined GPU ceiling | ~96 GiB |
-| Windows RAM | 64 GiB (ample headroom) |
+| Property                 | Value |
+|--------------------------|-----|
+| AMD VRAM                 | 64 GiB dedicated |
+| NVIDIA VRAM              | 32 GiB dedicated (PCIe) |
+| Combined GPU ceiling     | ~96 GiB |
+| Windows RAM              | 64 GiB (ample headroom) |
 | isLargeBar patch needed? | **No** — VRAM (64 GiB) ≤ GART cap (64 GiB) |
-| KV cache placement | ✅ Correctly in VRAM |
-| KV cache spill bug? | **No** — OS has enough RAM for GART/paging |
-| Max model (AMD only) | ~60 GiB (need room for KV cache) |
-| Max model (dual GPU) | ~92 GiB split across both GPUs |
-| `--no-mmap` safe? | Yes for models ≤ ~60 GiB; risky for larger (double-buffering) |
+| KV cache placement       | ✅ Correctly in VRAM |
+| KV cache spill bug?      | **No** — OS has enough RAM for GART/paging |
+| Max model (AMD only)     | ~60 GiB (need room for KV cache) |
+| Max model (dual GPU)     | ~92 GiB split across both GPUs |
+| `--no-mmap` safe?        | Yes for models ≤ ~60 GiB; risky for larger (double-buffering) |
 
 **Status**: ✅ Working. All benchmarks were collected with this configuration.
 
@@ -78,19 +101,19 @@ Historically, at 96 GB UMA, both bugs compounded: Bug 1 capped allocations at ~6
 └── 32 GB → Windows OS + applications
 ```
 
-| Property | Value |
-|----------|-------|
-| AMD VRAM | 96 GiB dedicated |
-| NVIDIA VRAM | 32 GiB dedicated (PCIe) |
-| Combined GPU ceiling | ~128 GiB (theoretical) |
-| Windows RAM | 32 GiB (barely enough) |
+| Property                 | Value |
+|--------------------------|-----|
+| AMD VRAM                 | 96 GiB dedicated |
+| NVIDIA VRAM              | 32 GiB dedicated (PCIe) |
+| Combined GPU ceiling     | ~128 GiB (theoretical) |
+| Windows RAM              | 32 GiB (barely enough) |
 | isLargeBar patch needed? | **Yes** — without it, `hipMalloc` caps at ~64 GiB despite 96 GiB VRAM |
-| KV cache placement | Historically spilled to shared memory; current stack needs re-benchmarking |
-| KV cache spill bug? | Previously reproducible; current severity unconfirmed |
-| Max model (AMD only) | Higher than 64 GB UMA in theory, but still needs practical validation |
-| Max model (dual GPU) | Higher than 64 GB UMA in theory, but still needs practical validation |
-| Generation speed | Previously ~60% slower than Scenario 1 on the same model; re-test pending |
-| System stability | Startup now works on the current setup; long-run stability still needs validation |
+| KV cache placement       | Historically spilled to shared memory; current stack needs re-benchmarking |
+| KV cache spill bug?      | Previously reproducible; current severity unconfirmed |
+| Max model (AMD only)     | Higher than 64 GB UMA in theory, but still needs practical validation |
+| Max model (dual GPU)     | Higher than 64 GB UMA in theory, but still needs practical validation |
+| Generation speed         | Previously ~60% slower than Scenario 1 on the same model; re-test pending |
+| System stability         | Startup now works on the current setup; long-run stability still needs validation |
 
 **Status**: Mixed. Older testing showed clear regression, but as of 2026-05-29 the current machine has successfully loaded a large model in `rocm-cuda`, allocated KV buffers, and served requests at 96 GB UMA. Treat this scenario as promising but not yet fully revalidated.
 
@@ -108,12 +131,12 @@ With only 32 GB for all of this, Windows memory management degrades, and the ROC
 
 If AMD fixes the KV cache spill bug in the ROCm driver and the isLargeBar patch gets merged upstream:
 
-| Property | Value |
-|----------|-------|
-| AMD VRAM | 96 GiB (all usable) |
+| Property             | Value |
+|----------------------|-----|
+| AMD VRAM             | 96 GiB (all usable) |
 | Combined GPU ceiling | ~128 GiB |
 | Max model (dual GPU) | ~120 GiB |
-| Requirements | Fixed ROCm driver + isLargeBar fix + llama.cpp PR [#20472](https://github.com/ggml-org/llama.cpp/pull/20472) |
+| Requirements         | Fixed ROCm driver + isLargeBar fix + llama.cpp PR [#20472](https://github.com/ggml-org/llama.cpp/pull/20472) |
 
 This would enable models like MiniMax-M2.5 Q3_K_M (101.76 GiB) to load fully on GPU.
 
@@ -133,13 +156,13 @@ Without the fix, `hipMalloc` is capped at ~64 GiB (Windows GART 50%-of-RAM limit
 
 The fix is a **single-byte change** in `amdhip64_7.dll` (v10.0.3665.0, SHA256 `0f2b166b...`):
 
-| Property | Value |
-|----------|-------|
-| File | `C:\Windows\SYSTEM32\amdhip64_7.dll` |
-| File offset | `0x003F69BA` |
+| Property      | Value |
+|---------------|-----|
+| File          | `C:\Windows\SYSTEM32\amdhip64_7.dll` |
+| File offset   | `0x003F69BA` |
 | Original byte | `0x74` (`JZ` — skip heap check for HIP) |
-| Patched byte | `0xEB` (`JMP` — always run heap check) |
-| Effect | Forces the `GpuHeapInvisible` size check path, which correctly sets `largeBar_ = true` on APUs with no invisible VRAM |
+| Patched byte  | `0xEB` (`JMP` — always run heap check) |
+| Effect        | Forces the `GpuHeapInvisible` size check path, which correctly sets `largeBar_ = true` on APUs with no invisible VRAM |
 
 **Backup**: `amdhip64_7.dll.original` in the project root.
 **Patched copy**: `amdhip64_7.dll.patched` in the project root, also placed in `runtime-rocm-cuda/`.
@@ -178,11 +201,11 @@ copy amdhip64_7.dll.patched C:\Windows\SYSTEM32\amdhip64_7.dll
 
 These results apply to Scenario 2 (96 GB UMA). At 64 GB UMA (Scenario 1), the patch has no observable effect.
 
-| Metric | Before patch | After patch |
-|--------|-------------|-------------|
-| `isLargeBar` | 0 | 1 |
-| Max `hipMalloc` (standalone) | ~64 GiB | ~84 GiB |
-| Max `hipMalloc` (with 28 GiB on NVIDIA) | ~36 GiB | ~70 GiB |
+| Metric                                  | Before patch | After patch |
+|-----------------------------------------|--------------|-------------|
+| `isLargeBar`                            | 0            | 1           |
+| Max `hipMalloc` (standalone)            | ~64 GiB      | ~84 GiB     |
+| Max `hipMalloc` (with 28 GiB on NVIDIA) | ~36 GiB      | ~70 GiB     |
 
 > **Note**: AMD driver updates or HIP SDK reinstalls will overwrite the system DLL. Re-apply the patch after updates. The upstream [fix PR](https://github.com/ROCm/rocm-systems/issues/4077) has been approved but not yet merged.
 
@@ -194,14 +217,14 @@ These results apply to Scenario 2 (96 GB UMA). At 64 GB UMA (Scenario 1), the pa
 
 Scenario 2 is currently broken (see above), but several workarounds may help. Use `scripts\diagnose-hip-memory.ps1` to diagnose the HIP memory state and `scripts\test-96gb-uma.ps1` to test models with workarounds applied.
 
-| # | Workaround | Rationale |
-|---|-----------|----------|
-| 1 | **Large page file (64–128 GB) on NVMe** | With only 32 GB OS RAM, Windows needs virtual memory headroom. A large page file on fast NVMe may prevent the GART starvation that triggers KV cache spill |
-| 2 | **Quantized KV cache** (`--cache-type-k q8_0 --cache-type-v q8_0`) | Halves the KV cache footprint — may keep it in VRAM below the spill threshold |
-| 3 | **`--flash-attn on`** | Flash attention reduces peak KV memory usage during inference |
-| 4 | **`--cache-ram 0`** | Disables the prompt cache, freeing VRAM for model + KV |
-| 5 | **Kill all GPU-using processes** | With 32 GB OS RAM, DWM, browsers, etc. consume precious shared memory |
-| 6 | **Disable Hyper-V** | Hyper-V reserves a memory partition that compounds the pressure |
+| #   | Workaround | Rationale |
+|-----|-----|-----|
+| 1   | **Large page file (64–128 GB) on NVMe** | With only 32 GB OS RAM, Windows needs virtual memory headroom. A large page file on fast NVMe may prevent the GART starvation that triggers KV cache spill |
+| 2   | **Quantized KV cache** (`--cache-type-k q8_0 --cache-type-v q8_0`) | Halves the KV cache footprint — may keep it in VRAM below the spill threshold |
+| 3   | **`--flash-attn on`** | Flash attention reduces peak KV memory usage during inference |
+| 4   | **`--cache-ram 0`** | Disables the prompt cache, freeing VRAM for model + KV |
+| 5   | **Kill all GPU-using processes** | With 32 GB OS RAM, DWM, browsers, etc. consume precious shared memory |
+| 6   | **Disable Hyper-V** | Hyper-V reserves a memory partition that compounds the pressure |
 
 **What WON'T work on Windows:**
 - `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1` — on Windows+HIP, `hipMallocManaged` falls back to `hipMalloc` silently (and is broken on Strix Halo anyway)
@@ -254,10 +277,10 @@ With Scenario 1 (**64 GB UMA**), the AMD iGPU has 64 GiB of dedicated VRAM carve
 Because AMD iGPU VRAM is carved from system RAM, NVIDIA PCIe memory-mapped allocations can still reduce the effective pool:
 
 | NVIDIA allocation | Max HIP allocation | Combined total |
-|-------------------|-------------------|----------------|
-| 0 GiB | ~64 GiB | ~64 GiB |
-| 28 GiB | ~64 GiB | ~92 GiB |
-| 32 GiB | ~64 GiB | ~96 GiB |
+|-------------------|--------------------|----------------|
+| 0 GiB             | ~64 GiB            | ~64 GiB        |
+| 28 GiB            | ~64 GiB            | ~92 GiB        |
+| 32 GiB            | ~64 GiB            | ~96 GiB        |
 
 > **Scenario 2 (96 GB UMA)** would theoretically raise the AMD allocation to ~84 GiB (with isLargeBar patch) for a ~128 GiB combined ceiling, but the KV cache spill bug (Bug 2) makes it unusable — see Scenarios above.
 

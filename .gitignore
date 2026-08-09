@@ -10,6 +10,11 @@ __pycache__/
 *.dll
 *.lib
 *.exp
+*.so
+*.so.*
+*.o
+*.a
+build/
 
 # Specific local folders
 hip-release-temp/
