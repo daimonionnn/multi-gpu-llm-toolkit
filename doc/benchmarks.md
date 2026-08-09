@@ -60,15 +60,15 @@ auto, f16 KV, layer split, proportional tensor split).
 **Build:** llama.cpp `7ba604f`, CUDA 13.3, ROCm 7.1, RADV, **stock (no
 `--patches`)**. Measured 2026-08-09.
 
-| Config | Backend / devices | pp512 (t/s) | vs CUDA | tg128 (t/s) | vs CUDA |
-|---|---|---:|---:|---:|---:|
-| **cuda** | CUDA0 (NVIDIA alone) | **2232.6** ±28.5 | 100% | **61.17** ±0.06 | 100% |
-| vulkan (NVIDIA) | Vulkan1 (NVIDIA alone) | 2168.5 ±11.0 | 97% | 59.47 ±0.20 | 97% |
-| rocm-cuda | ROCm0 + CUDA0 | 1635.6 ±35.9 | 73% | 50.58 ±0.05 | 83% |
-| vulkan-vulkan | Vulkan2 + Vulkan1 | 1514.2 ±6.8 | 68% | 42.66 ±0.14 | 70% |
-| vulkan-cuda | Vulkan2 + CUDA0 | 1506.3 ±41.8 | 67% | 49.56 ±0.07 | 81% |
-| vulkan (AMD) | Vulkan2 (AMD alone) | 869.9 ±1.2 | 39% | 25.37 ±0.01 | 41% |
-| rocm (AMD) | ROCm0 (AMD alone) | 743.5 ±7.0 | 33% | 24.18 ±0.02 | 40% |
+| Config          | Backend / devices      | pp512 (t/s)      | vs CUDA | tg128 (t/s)     | vs CUDA |
+|-----------------|------------------------|-----------------:|--------:|----------------:|--------:|
+| **cuda**        | CUDA0 (NVIDIA alone)   | **2232.6** ±28.5 | 100%    | **61.17** ±0.06 | 100%    |
+| vulkan (NVIDIA) | Vulkan1 (NVIDIA alone) | 2168.5 ±11.0     | 97%     | 59.47 ±0.20     | 97%     |
+| rocm-cuda       | ROCm0 + CUDA0          | 1635.6 ±35.9     | 73%     | 50.58 ±0.05     | 83%     |
+| vulkan-vulkan   | Vulkan2 + Vulkan1      | 1514.2 ±6.8      | 68%     | 42.66 ±0.14     | 70%     |
+| vulkan-cuda     | Vulkan2 + CUDA0        | 1506.3 ±41.8     | 67%     | 49.56 ±0.07     | 81%     |
+| vulkan (AMD)    | Vulkan2 (AMD alone)    | 869.9 ±1.2       | 39%     | 25.37 ±0.01     | 41%     |
+| rocm (AMD)      | ROCm0 (AMD alone)      | 743.5 ±7.0       | 33%     | 24.18 ±0.02     | 40%     |
 
 ### What this says
 
@@ -110,15 +110,15 @@ therefore not directly comparable with the `-fa auto` table above.
 
 **Token generation (tg128, t/s)**
 
-| Config | d=0 | d=4096 | d=16384 | d=32768 | retained |
-|---|---:|---:|---:|---:|---:|
-| vulkan (NVIDIA) | 61.2 | 60.2 | 58.0 | **55.3** | 90% |
-| vulkan-vulkan | 42.8 | 42.1 | 40.3 | 37.2 | 87% |
-| vulkan (AMD) | 25.4 | 25.0 | 24.1 | 23.1 | 91% |
-| rocm (AMD) | 24.2 | 24.0 | 23.3 | 22.3 | 92% |
-| rocm-cuda | 50.6 | 49.2 | 21.1 | 13.4 | 26% |
-| cuda (NVIDIA) | 64.7 | 62.4 | 21.3 | 12.9 | **20%** |
-| vulkan-cuda | 49.6 | 47.4 | 19.4 | 12.1 | 24% |
+| Config          | d=0  | d=4096 | d=16384 | d=32768  | retained |
+|-----------------|-----:|-------:|--------:|---------:|---------:|
+| vulkan (NVIDIA) | 61.2 | 60.2   | 58.0    | **55.3** | 90%      |
+| vulkan-vulkan   | 42.8 | 42.1   | 40.3    | 37.2     | 87%      |
+| vulkan (AMD)    | 25.4 | 25.0   | 24.1    | 23.1     | 91%      |
+| rocm (AMD)      | 24.2 | 24.0   | 23.3    | 22.3     | 92%      |
+| rocm-cuda       | 50.6 | 49.2   | 21.1    | 13.4     | 26%      |
+| cuda (NVIDIA)   | 64.7 | 62.4   | 21.3    | 12.9     | **20%**  |
+| vulkan-cuda     | 49.6 | 47.4   | 19.4    | 12.1     | 24%      |
 
 Prompt processing degrades in the same shape: at 32k, `vulkan (NVIDIA)` holds
 941.5 t/s (41% of its depth-0 rate) against `cuda` at 205.7 (9%).
@@ -135,8 +135,56 @@ Two things in this table are *not* about that bug and are worth keeping:
 - **The ranking inverts between short and long context.** At depth 0 `rocm-cuda`
   is the best dual configuration; by 32k `vulkan-vulkan` is roughly 3x better.
   Backend choices made on depth-0 numbers are wrong for long-context work.
+  (This inversion disappears with a healthy CUDA build - see below.)
 - **Vulkan and ROCm both degrade gracefully**, holding 87-92% of generation
   throughput out to 32k on either vendor.
+
+### The definitive matrix: CUDA backend built with CUDA 12.8
+
+Same model, depths and parameters, with the CUDA-containing configurations
+running the `build-cuda12-container.sh` runtimes (`runtime-rocm-cuda128`,
+`runtime-vulkan-cuda128`). Vulkan and ROCm rows use the same binaries as
+before and moved less than 1%, which validates the comparison.
+
+**Token generation (tg128, t/s)** - arrow shows CUDA-13.3-stock -> CUDA-12.8:
+
+| Config               | d=0      | d=4096   | d=32768             |
+|----------------------|---------:|---------:|--------------------:|
+| cuda (NVIDIA)        | 78 -> 77 | 75 -> 76 | 13 -> **70** (5.2x) |
+| vulkan (NVIDIA)      | 73       | 72       | 65                  |
+| rocm-cuda (dual)     | 59 -> 51 | 57 -> 51 | 14 -> **47** (3.4x) |
+| vulkan-cuda (dual)   | 58 -> 53 | 56 -> 52 | 13 -> **45** (3.5x) |
+| vulkan-vulkan (dual) | 52       | 51       | 44                  |
+| vulkan (AMD)         | 31       | 30       | 27                  |
+| rocm (AMD)           | 28       | 28       | 26                  |
+
+**Prompt processing (pp512, t/s)**:
+
+| Config               | d=0                     | d=4096                  | d=32768                 |
+|----------------------|------------------------:|------------------------:|------------------------:|
+| cuda (NVIDIA)        | 2787 -> **3597** (1.3x) | 1106 -> **3863** (3.5x) | 209 -> **2936** (14.1x) |
+| vulkan (NVIDIA)      | 2663                    | 2166                    | 989                     |
+| rocm-cuda (dual)     | 2063 -> 2153            | 1019 -> **2012** (2.0x) | 222 -> **1277** (5.8x)  |
+| vulkan-cuda (dual)   | 1703 -> 1738            | 833 -> **1407** (1.7x)  | 180 -> **575** (3.2x)   |
+| vulkan-vulkan (dual) | 1722                    | 1423                    | 665                     |
+| vulkan (AMD)         | 993                     | 885                     | 529                     |
+| rocm (AMD)           | 1152                    | 988                     | 528                     |
+
+What changes with the healthy build:
+
+- **CUDA is simply the fastest NVIDIA backend at every depth**, in both
+  metrics. The short/long-context ranking inversion is gone; so is the earlier
+  advice to prefer Vulkan for long context. Vulkan remains the fallback when a
+  container build is not an option.
+- **The 13.3 damage was never limited to generation past 8k.** Prefill was
+  losing 1.3x at depth 0, 3.5x at 4k and 14x at 32k - a penalty invisible in
+  the earlier tables because every configuration shared it.
+- **`rocm-cuda` is again the best dual configuration at every depth**
+  (51/51/47 vs 52/50/44 for `vulkan-vulkan`, and roughly double its prefill).
+- **One real trade-off**: the mixed dual runtimes lose ~10% generation at short
+  context versus the pure 13.3 build (59 -> 51 at d=0, reproduced across both
+  dual configs). Unexplained; if a workload never exceeds ~4k context, the
+  stock 13.3 dual is marginally faster.
 
 ### Bug: the CUDA backend cannot run with flash attention disabled
 

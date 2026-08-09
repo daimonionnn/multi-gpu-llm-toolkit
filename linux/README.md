@@ -160,7 +160,8 @@ Two headlines: splitting a model that fits on one card costs 17–33% throughput
 so dual-GPU is for models that do not fit rather than for speed; and **the CUDA
 backend collapses as context grows** — at 32k depth it retains 9% of prompt and
 20% of generation throughput, while Vulkan on the same RTX PRO 6000 retains
-41% / 90%. For long context on this rig, drive the NVIDIA card with Vulkan.
+41% / 90%. (With the CUDA 12.8 container build below, CUDA regains the lead at
+every depth and this advice is obsolete.)
 
 The CUDA backend also aborts outright with `-fa off` (`CUDA error: invalid
 argument`) at every depth, so it is flash-attention-only here.
