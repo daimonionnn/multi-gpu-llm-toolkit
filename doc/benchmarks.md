@@ -426,6 +426,30 @@ full fidelity of a smaller model at 3x the speed.
 Sources: [Unsloth DeepSeek-V4 docs](https://unsloth.ai/docs/models/deepseek-v4),
 [antirez/deepseek-v4-gguf](https://huggingface.co/antirez/deepseek-v4-gguf).
 
+### The RAM-offload cliff: why 3-bit DeepSeek is not worth it here
+
+IQ3_S (108 GB) looked like the sweet spot between the 2-bit speed picks and
+MXFP4 — better quality, only a little too big for the card. It is not:
+
+| Quant | Size | RAM-hosted expert layers | pp 4k/16k/65k | tg |
+|---|---:|---:|---|---:|
+| antirez IQ2XXS+Q8 | 80.8 GB | 0 | 2007 / 2040 / 1557 | **74.5** |
+| IQ3_XXS | 97.1 GB | 8 | 936 / 986 / 876 | 29.3 |
+| IQ3_S | 108 GB | 10 | 574 / 790 / 731 | 27.4–28.4 |
+| MXFP4 (`--cuda-only`) | 146 GB | 18 | ~305 | 16.4 |
+
+`--n-cpu-moe 4` and `7` both OOM'd; 10 was the first that loaded, and by then
+the speed is IQ3_XXS's with none of the size advantage. The pattern across
+the whole table is the real lesson: **on this rig generation speed tracks the
+number of RAM-hosted expert layers almost linearly, and nothing else.** The
+step from 0 layers to 8 costs 60% of throughput — far more than the ~20% the
+memory-bandwidth arithmetic predicts, because each RAM layer adds
+synchronisation and CPU compute, not just slower reads.
+
+Practical consequence: for DeepSeek there are exactly two sensible points,
+not a ladder. Everything that fits the card whole (~2-bit, 74 tg) or the
+lossless MXFP4 accepting 16 tg. The 3-bit middle is dominated by both.
+
 ### gpt-oss-120b — the fastest model on this rig
 
 Native-MXFP4 MoE (60 GB, 128 experts / 4 active), fits the NVIDIA card whole:
