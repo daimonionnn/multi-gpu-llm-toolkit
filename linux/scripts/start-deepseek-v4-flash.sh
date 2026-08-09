@@ -4,11 +4,12 @@
 # Default is CUDA-only with 8 layers of experts in system RAM - measured
 # stable through repeated 130k-token prefills and full-cache clears.
 #
-# The dual rocm-cuda mode generates ~1.4x faster but the DSV4 KV-cache code
-# faults intermittently on the ROCm backend (HSA_STATUS_ERROR_MEMORY_FAULT
-# during long prefills or after clearing a large cache; reproduced at 43k,
-# ~130k and 256k scales). DSV4 support in llama.cpp is days old - retest dual
-# after upstream updates. Details: doc/benchmarks.md, DeepSeek section.
+# Every dual layout is unstable for this model today: the HIP MoE
+# expert-matmul / IQ3_XXS path on gfx1201 faults intermittently under load
+# (HSA_STATUS_ERROR_MEMORY_FAULT at 43k-225k tokens of prefill work), even
+# with only expert weights on the AMD card. Dense models on the same card are
+# fine. Retest dual after llama.cpp updates - the expert-offload -ot layout
+# measured 57 t/s before crashing. Details: doc/benchmarks.md, DeepSeek section.
 #
 # Usage:
 #   ./start-deepseek-v4-flash.sh                 # stable: CUDA-only, 128k ctx
