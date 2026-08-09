@@ -1,39 +1,56 @@
 #!/usr/bin/env bash
-# DeepSeek V4 Flash 0731 UD-IQ3_XXS (98 GB, MoE 256 experts, MLA).
+# DeepSeek V4 Flash 0731 (MoE 256 experts, MLA) - profile with two quants:
 #
-# Default is CUDA-only with 8 layers of experts in system RAM - measured
-# stable through repeated 130k-token prefills and full-cache clears.
+#   IQ3_XXS (98 GB)  - fastest; fits the NVIDIA card, CUDA-only. Lowest quality.
+#   MXFP4  (146 GB)  - lossless reference (the model is QAT with native MXFP4
+#                      experts); expert-offload dual, stable through gauntlets.
 #
-# Every dual layout is unstable for this model today: the HIP MoE
-# expert-matmul / IQ3_XXS path on gfx1201 faults intermittently under load
-# (HSA_STATUS_ERROR_MEMORY_FAULT at 43k-225k tokens of prefill work), even
-# with only expert weights on the AMD card. Dense models on the same card are
-# fine. Retest dual after llama.cpp updates - the expert-offload -ot layout
-# measured 57 t/s before crashing. Details: doc/benchmarks.md, DeepSeek section.
+# The classic layer-split dual is unstable for the IQ3 quant only: the HIP
+# IQ-series MoE kernels fault intermittently on gfx1201. MXFP4/k-quant expert
+# paths on the AMD card are fine (~0.5M prefill tokens without a fault).
+# Full numbers and the stability matrix: doc/benchmarks.md, DeepSeek section.
 #
 # Usage:
-#   ./start-deepseek-v4-flash.sh                 # stable: CUDA-only, 128k ctx
-#   ./start-deepseek-v4-flash.sh --256k          # stable: CUDA-only, full 256k ctx
-#   ./start-deepseek-v4-flash.sh --dual          # faster tg, UNSTABLE today
+#   ./start-deepseek-v4-flash.sh                 # IQ3_XXS, CUDA-only, 128k - fastest
+#   ./start-deepseek-v4-flash.sh --256k          # IQ3_XXS, CUDA-only, full 256k
+#   ./start-deepseek-v4-flash.sh --mxfp4         # MXFP4, expert-offload dual, 128k - best quality
+#   ./start-deepseek-v4-flash.sh --dual          # IQ3_XXS classic dual - UNSTABLE (IQ kernels)
 #   ./start-deepseek-v4-flash.sh -- --port 8090  # extra llama-server args
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LINUX_ROOT="$(dirname -- "$SCRIPT_DIR")"
 
-MODEL=/home/matt/.lmstudio/models/unsloth/DeepSeek-V4-Flash-0731-GGUF/DeepSeek-V4-Flash-0731-UD-IQ3_XXS-00001-of-00004.gguf
+MODEL_IQ3=/home/matt/.lmstudio/models/unsloth/DeepSeek-V4-Flash-0731-GGUF/DeepSeek-V4-Flash-0731-UD-IQ3_XXS-00001-of-00004.gguf
+MODEL_MXFP4=/home/matt/.lmstudio/models/lmstudio-community/DeepSeek-V4-Flash-0731-GGUF/DeepSeek-V4-Flash-0731-MXFP4-00001-of-00004.gguf
 
+MODEL="$MODEL_IQ3"
 MODE_ARGS=(--mode cuda)
 MODEL_ARGS=(-c 131072 --n-cpu-moe 8)
-if [[ "${1:-}" == "--256k" ]]; then
-    shift
-    # Verified: two consecutive 261900-token prefills incl. a full-cache clear.
-    MODEL_ARGS=(-c 262144 --n-cpu-moe 10)
-elif [[ "${1:-}" == "--dual" ]]; then
-    shift
-    echo "WARNING: dual rocm-cuda is unstable for this model (intermittent ROCm faults)." >&2
-    MODE_ARGS=(--mode rocm-cuda)
-    MODEL_ARGS=(-c 262144)
-fi
+case "${1:-}" in
+    --256k)
+        shift
+        # Verified: two consecutive 261900-token prefills incl. a full-cache clear.
+        MODEL_ARGS=(-c 262144 --n-cpu-moe 10)
+        ;;
+    --mxfp4)
+        shift
+        # Lossless quant on the expert-offload dual: every layer, the KV cache
+        # and attention stay on CUDA0 (-ts 0,1); the AMD card serves expert
+        # matmuls for 8 layers from VRAM; experts of the first 10 layers go to
+        # system RAM. Gauntlet-verified stable; 480-592 pp, 21-25 tg.
+        MODEL="$MODEL_MXFP4"
+        MODE_ARGS=(--mode rocm-cuda)
+        MODEL_ARGS=(-c 131072 --n-cpu-moe 10
+                    -ts 0,1 -ot 'blk\.(3[5-9]|4[0-2])\.ffn_.*_exps.*=ROCm0')
+        ;;
+    --dual)
+        shift
+        echo "WARNING: classic dual is unstable with the IQ3 quant (HIP IQ-kernel faults)." >&2
+        echo "         For a stable dual use --mxfp4 instead." >&2
+        MODE_ARGS=(--mode rocm-cuda)
+        MODEL_ARGS=(-c 262144)
+        ;;
+esac
 [[ "${1:-}" == "--" ]] && shift
 
 exec "$SCRIPT_DIR/start-llama-server.sh" "${MODE_ARGS[@]}" \
