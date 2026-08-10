@@ -494,3 +494,28 @@ Profile: `start-step37.sh` (`--128k` shifts one more expert layer to AMD).
 > llama.cpp — `tensor 'blk.3.ffn_down_exps.weight' has invalid ggml type 213`.
 > The `-R4` row-interleaved repack is an **ik_llama.cpp** extension. Use the
 > stepfun-ai Q4_K_S for mainline.
+
+### ik_llama.cpp evaluated for the RAM-offload case
+
+`ik_llama.cpp` (fork at `bd342d6`, "DS4 optimizations") is built around exactly
+our weakest configuration — large MoE with experts in system RAM — with MLA
+variants, `-fmoe`, run-time repacking and R4 quants. Measured against our
+mainline MXFP4 CUDA-only, same model, same 128k context:
+
+| Engine | pp 4k/16k/65k | tg 4k/16k/65k |
+|---|---|---|
+| mainline `--cuda-only` | ~305 | **16.4** |
+| ik_llama (`-mla 3 -fidx`) | 214 / 217 / 203 | 19.5 / 19.6 / 17.5 |
+
+**+19% generation, −30% prefill.** Real but modest, and the prefill loss
+cancels it for prompt-heavy work. Two caveats on the comparison: the ik build
+on disk predates its own checkout (binary `31018dc`, tree `bd342d6`), and no
+tuning of `-fmoe`/`-amb`/`-ser` was attempted — a tuned, current build could
+do better.
+
+Structural limitation that decides the architecture question: **ik_llama has
+no `GGML_BACKEND_DL`**, one backend per build, so it cannot host AMD and
+NVIDIA in a single process. It is complementary to this repo rather than a
+replacement — mainline for dual-vendor, ik for NVIDIA+RAM MoE — and it is the
+only way to run the `-R4` repacked quants (ggml type 213) that mainline
+rejects.
