@@ -268,7 +268,9 @@ The ROCm backend (gfx1201) faults intermittently under this model's compute:
 CUDA-only passed every killer scenario (130k and 256k double-probes with
 full-cache clears), and the expert-offload dual passed them on non-IQ quants —
 see the quantization table below. The launch profiles are split by placement:
-`start-deepseek-mxfp4.sh` (lossless reference, dual + RAM, 256k default),
+`start-deepseek-mxfp4.sh` (lossless reference, dual + RAM, 128k default -
+faster than 256k because the smaller KV cache keeps two more expert layers
+off DDR5; `--256k` for the full window),
 `start-deepseek-nvidia.sh` (single-card fits, plus the verified RAM-assisted
 IQ3 configs), `start-deepseek-nvidia-amd.sh` (all-VRAM dual, Q2_K_XL). None of
 this indicts dual-vendor as such — dense models run the same dual runtimes

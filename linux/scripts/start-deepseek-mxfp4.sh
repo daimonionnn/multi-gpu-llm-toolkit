@@ -17,8 +17,8 @@
 # start-deepseek-nvidia-amd.sh (all-VRAM dual). Numbers: doc/benchmarks.md.
 #
 # Usage:
-#   ./start-deepseek-mxfp4.sh                 # full 256k context (default)
-#   ./start-deepseek-mxfp4.sh --128k          # 128k, two fewer expert layers in RAM
+#   ./start-deepseek-mxfp4.sh                 # 128k context (default)
+#   ./start-deepseek-mxfp4.sh --256k          # full 262144 context, ~20% slower prefill
 #   ./start-deepseek-mxfp4.sh --cuda-only     # no AMD card: slower (pp ~305, tg ~16.4)
 #                                             # but immune to the ROCm faults - use
 #                                             # for unattended/fallback service duty
@@ -29,17 +29,25 @@ LINUX_ROOT="$(dirname -- "$SCRIPT_DIR")"
 
 MODEL=/home/matt/.lmstudio/models/lmstudio-community/DeepSeek-V4-Flash-0731-GGUF/DeepSeek-V4-Flash-0731-MXFP4-00001-of-00004.gguf
 
-# Default: full 256k. KV needs ~13 GB on CUDA0, so experts of the first 12
-# layers go to system RAM; the AMD card serves expert matmuls for 8 layers.
-# 256k-verified: 386 pp / 18.4 tg on a full 261900-token prompt, incl. the
-# clear-and-refill cycle.
+# Default: 128k. The smaller KV cache frees VRAM that then holds two more
+# expert layers, so only 10 go to system RAM instead of 12 - and DDR5 at
+# ~75 GB/s is the bottleneck, not the GPUs. That makes 128k *faster*, not just
+# smaller: 480-592 pp against 386 at 256k, gauntlet-verified, 21-25 tg.
+#
+# 256k was the default until 2026-08-10. It was the right default while this
+# was the "lossless reference at full context" profile; it is the wrong one now
+# that the profile's main job is answering hermes, where prefill latency before
+# the first token is what the user feels. A 63.5k-token conversation prefills
+# in ~115 s here against ~165 s at 256k.
 MODE_ARGS=(--mode rocm-cuda)
 OT_ARGS=(-ts 0,1 -ot 'blk\.(3[5-9]|4[0-2])\.ffn_.*_exps.*=ROCm0')
-MODEL_ARGS=(-c 262144 --n-cpu-moe 12)
-if [[ "${1:-}" == "--128k" ]]; then
+MODEL_ARGS=(-c 131072 --n-cpu-moe 10)
+if [[ "${1:-}" == "--256k" ]]; then
     shift
-    # Gauntlet-verified: 480-592 pp, 21-25 tg.
-    MODEL_ARGS=(-c 131072 --n-cpu-moe 10)
+    # KV needs ~13 GB on CUDA0, so two more expert layers are exiled to RAM.
+    # Verified: 386 pp / 18.4 tg on a full 261900-token prompt, incl. the
+    # clear-and-refill cycle.
+    MODEL_ARGS=(-c 262144 --n-cpu-moe 12)
 elif [[ "${1:-}" == "--cuda-only" ]]; then
     shift
     # The AMD expert path faults intermittently on ALL quants (reproduced on
