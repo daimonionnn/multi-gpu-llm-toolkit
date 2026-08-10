@@ -38,6 +38,7 @@ Everything after `--` goes to `llama-server` untouched — the equivalent of
 | `run-llama-bench.sh`        | Raw hardware benchmark via `llama-bench`           | `run-llama-bench.ps1`         |
 | `benchmark-loaded-model.sh` | End-to-end HTTP benchmark against a running server | `benchmark-loaded-model.ps1`  |
 | `start-open-webui.sh`       | Open WebUI frontend via Docker                     | `start-open-webui.ps1`        |
+| `stop-llama.sh`             | Stop this project's servers and hand the GPUs back | — |
 | `start-model-template.sh`   | Model profile template — copy per model            | `start-qwen122b-q6k.ps1` etc. |
 | `start-deepseek-mxfp4.sh`   | DeepSeek V4 Flash, MXFP4 (lossless reference): expert-offload dual + RAM, 256k default | — |
 | `start-deepseek-mxfp4-cuda-only.sh` | The same, NVIDIA-only — fault-immune profile the systemd fallback service runs | — |
@@ -109,6 +110,34 @@ The default port is **8081**, where the Windows scripts use llama.cpp's usual
 8080 permanently, and a server started there dies with `couldn't bind HTTP
 server socket`. The Windows side keeps 8080 — the clash belongs to one
 machine, not to the project. Override either way with `--port`.
+
+## Freeing the GPU
+
+Three different-looking failures are the same situation — something is still
+holding a resource:
+
+- the next launch OOMs, because a model is already resident;
+- it reports **`no CUDA device detected`**, because the previous 146 GB model
+  is still tearing down and its VRAM has not come back yet;
+- it dies with **`couldn't bind HTTP server socket`**, because something owns
+  the port.
+
+```bash
+./stop-llama.sh            # stop our servers, wait for the VRAM to return
+./stop-llama.sh --status   # report only: who holds VRAM and the usual ports
+./stop-llama.sh --all      # also ask LM Studio / Ollama to unload
+```
+
+It finds systemd units by what they run rather than by name, so a second
+profile added as a service later is picked up without editing the script.
+Stopping the unit is not optional: `deepseek-server` has `Restart=on-failure`,
+a killed process exits 143, and systemd counts that as a failure and restarts
+it 15 seconds later.
+
+Ports are **reported, never killed**. On this box 8080 belongs permanently to
+an unrelated Caddy container, and freeing someone else's port by killing their
+process is not a cleanup script's business — that is why the default moved to
+8081 instead.
 
 ## Web UI
 
