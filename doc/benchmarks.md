@@ -507,11 +507,42 @@ mainline MXFP4 CUDA-only, same model, same 128k context:
 | mainline `--cuda-only` | ~305 | **16.4** |
 | ik_llama (`-mla 3 -fidx`) | 214 / 217 / 203 | 19.5 / 19.6 / 17.5 |
 
-**+19% generation, −30% prefill.** Real but modest, and the prefill loss
-cancels it for prompt-heavy work. Two caveats on the comparison: the ik build
-on disk predates its own checkout (binary `31018dc`, tree `bd342d6`), and no
-tuning of `-fmoe`/`-amb`/`-ser` was attempted — a tuned, current build could
-do better.
+That first comparison was unfair on both counts, and re-doing it properly
+reverses the verdict. The ik binary on disk predated its own checkout by two
+weeks, missing a burst of DS4 optimisations landed 2026-08-07/08, and it ran
+with f16 KV and default threads. Current build, q8_0 KV, 24 threads:
+
+| Engine (both CUDA 12.8 class) | pp 4k/16k/65k | tg 4k/16k/65k |
+|---|---|---|
+| mainline `--cuda-only` (f16 KV) | ~305 | 16.4 |
+| **ik_llama** (q8_0 KV, 24 threads) | **366 / 385 / 362** | **19.8 / 19.5 / 17.7** |
+
+**+26% prefill and +19% generation** — enough to matter for the RAM-offload
+case, which is the one configuration where this repo's engine is weakest.
+
+Part of that gap is a capability difference rather than a speed difference:
+ik runs the KV cache at q8_0, and **mainline segfaults with `-ctk q8_0` on
+this model past ~4k context** (reproduced twice; 4k alone gives 335 pp /
+18.9 tg, 16k kills the server). Notably one of the ik commits from that same
+week is titled *"Allow Q8_0 cache in the CUDA DSA implementation"*.
+
+Three tuning variables were then isolated, one at a time, on the ik side:
+
+| Variable | Result |
+|---|---|
+| **Threads 12 → 24** | pp 268.6 → 354.6 (**+32%**), tg flat at 24.6–25.2 |
+| CUDA 13.3 → 12.8 (arch and threads fixed) | 382.0 → 384.6 pp, 19.71 → 19.47 tg — noise |
+| `120-real` → `120a-real` | 376.2 → 384.6 pp — noise |
+
+So the **Blackwell CUDA 13.x collapse documented in
+[cuda-fa-blackwell.md](cuda-fa-blackwell.md) does not affect ik_llama** — its
+MLA path does not go through the flash-attention kernels that misbehave on
+sm_120. Only mainline needs the CUDA 12.8 container build.
+
+Threads were the whole story, and only for prefill: generation is
+bandwidth-bound and flat from 12 threads upward. The toolkit's own tuning
+guide had concluded 18 threads was optimal because its table only measured
+generation.
 
 Structural limitation that decides the architecture question: **ik_llama has
 no `GGML_BACKEND_DL`**, one backend per build, so it cannot host AMD and
