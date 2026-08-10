@@ -10,7 +10,7 @@ CONTAINER_NAME="open-webui"
 PORT=3000
 # host.docker.internal needs --add-host on Linux; Docker Desktop provides it
 # automatically on Windows, plain Docker Engine does not.
-API_BASE="http://host.docker.internal:8080/v1"
+API_BASE="http://host.docker.internal:8081/v1"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

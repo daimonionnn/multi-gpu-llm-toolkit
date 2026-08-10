@@ -7,13 +7,13 @@
 # server in the way, use run-llama-bench.sh instead.
 #
 # Usage:
-#   ./benchmark-loaded-model.sh [--url http://127.0.0.1:8080] \
+#   ./benchmark-loaded-model.sh [--url http://127.0.0.1:8081] \
 #       [--contexts 1024,4096,16384] [--predict 256] [--timeout 7200] \
 #       [--out-csv results.csv] [--mode rocm-cuda]
 
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
-BASE_URL="http://127.0.0.1:8080"
+BASE_URL="http://127.0.0.1:8081"
 CONTEXTS="1024,4096,16384"
 PREDICT_TOKENS=256
 TIMEOUT_SEC=7200

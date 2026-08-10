@@ -11,7 +11,7 @@
 #   vulkan-cuda   — AMD Vulkan + NVIDIA CUDA dual GPU
 #
 # Usage:
-#   ./start-llama-server.sh --mode rocm-cuda [--port 8080] [--runtime DIR] \
+#   ./start-llama-server.sh --mode rocm-cuda [--port 8081] [--runtime DIR] \
 #                           [--no-pinned] -- -m model.gguf -c 8192 -ngl 99
 #
 # Everything after `--` is passed through to llama-server unchanged.
@@ -19,7 +19,12 @@
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 MODE="rocm-cuda"
-PORT=8080
+# 8081, not llama.cpp's usual 8080: on the dual-linux box a Caddy container
+# from an unrelated docker stack publishes 8080->80 permanently, so a server
+# started there dies with "couldn't bind HTTP server socket". The Windows
+# scripts still default to 8080 - the clash is this machine's, not the
+# project's, and there is nothing to gain by moving a port that works.
+PORT=8081
 RUNTIME_DIR=""
 NO_PINNED=0
 EXTRA_ARGS=()

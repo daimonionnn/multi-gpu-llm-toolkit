@@ -97,12 +97,18 @@ bugs can occur on which hardware.
   even `1,1` caps the model at 64 GB and idles two thirds of the NVIDIA card.
   Device order is AMD first, so `1,3` is the starting point. Untuned.
 
-### One deliberate behavioural difference
+### Two deliberate behavioural differences
 
 `start-llama-server.ps1` always sets `GGML_CUDA_NO_PINNED=1` for ROCm/CUDA
 modes. That was a WDDM workaround; on Linux pinned host memory works normally
 and disabling it costs transfer bandwidth. Here it is **off by default** and
 available as `--no-pinned` if a problem shows up.
+
+The default port is **8081**, where the Windows scripts use llama.cpp's usual
+8080. On `dual-linux` a Caddy container from an unrelated docker stack holds
+8080 permanently, and a server started there dies with `couldn't bind HTTP
+server socket`. The Windows side keeps 8080 — the clash belongs to one
+machine, not to the project. Override either way with `--port`.
 
 ## Web UI
 
@@ -116,6 +122,10 @@ gh release download b10331 --repo ggml-org/llama.cpp --pattern "llama-b10331-ui.
 
 `start-llama-server.sh` picks `linux/webui/` up automatically (skipped if you
 pass your own `--path`). Without it the API still works but `/` returns 415.
+
+So a server started with the defaults is at <http://127.0.0.1:8081>. The
+`deepseek-server` systemd fallback is the exception: it is pinned to 8099 so
+it never collides with an interactive server.
 
 ## Prerequisites
 
