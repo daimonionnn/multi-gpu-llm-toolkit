@@ -4,8 +4,14 @@
 # The model is QAT with native MXFP4 experts, so this quant IS the original
 # weights; every other quant is equal at best (Q8) or lossy (Q4 and below).
 # Too large for VRAM alone: expert-offload dual plus experts of the first
-# 10-12 layers in system RAM. Gauntlet-verified stable on the AMD card
-# (MXFP4 is not an IQ quant, so the HIP IQ-kernel fault does not apply).
+# 10-12 layers in system RAM.
+#
+# STABILITY: the dual layouts here are NOT safe for unattended duty. This
+# header used to claim MXFP4 was exempt from the HIP fault because it is not
+# an IQ quant; that was disproved in production on 2026-08-09, when the MXFP4
+# dual faulted at ~45k prefill tokens hours after passing its gauntlet. The
+# fault is low-rate and probabilistic on the AMD expert path, so passing a
+# gauntlet certifies nothing. Use --cuda-only for anything that must stay up.
 #
 # Sibling profiles: start-deepseek-nvidia.sh (single-card fits),
 # start-deepseek-nvidia-amd.sh (all-VRAM dual). Numbers: doc/benchmarks.md.

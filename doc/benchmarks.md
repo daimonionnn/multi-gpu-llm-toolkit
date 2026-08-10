@@ -343,6 +343,53 @@ the usual quant ladder into a single sensible choice per size class: MXFP4
 (reference quality, needs dual or CPU offload) or IQ3_XXS (fits one card,
 fastest, lowest quality).
 
+#### Upstream fix status (checked 2026-08-10) — still none
+
+22 commits landed upstream after the build we run; none touches the
+`deepseek4` or HIP MoE path. ROCm is 7.1.1 with nothing newer in the
+repository, and neither ds4 fork has done any gfx1201 work.
+
+One upstream bug looked like an excellent match and had to be **ruled out**:
+[#26738](https://github.com/ggml-org/llama.cpp/issues/26738), fix in the open
+PR [#26771](https://github.com/ggml-org/llama.cpp/pull/26771).
+`ggml_cuda_pool_leg::clear_pool()` frees scratch buffers that an already
+captured HIP graph still points at, so the next replay writes to freed memory.
+Its stated preconditions all hold in our build (`GGML_HIP_NO_VMM=ON`,
+`GGML_HIP_GRAPHS=ON`, MoE expert offload), and it would have explained the
+fault far better than architecture does — under it the trigger is VRAM
+pressure, so DeepSeek faults where the smaller gpt-oss does not, with no need
+for anything `deepseek4`-specific.
+
+It is not our bug. `clear_pool()` only runs when an allocation actually fails,
+and **with `-fa on` it never does**: flash attention never materialises the KQ
+matrix, so buffer demand reaches steady state instead of growing with context
+depth. That is why the reporter needed `-fa 0` — the condition is causal, not
+incidental to their setup.
+
+Measured rather than assumed. Two runs at `-lv 5` (the flush message is
+`GGML_LOG_DEBUG`, which the default INFO verbosity discards — so no earlier
+crash log of ours could ever have shown it):
+
+| run | workload | AMD VRAM free | pool flushes | fault |
+|---|---|---:|---:|---|
+| 8 expert layers | 4 x 65k identical prefills | 3.8 GiB | 0 | no |
+| 9 expert layers | 385k tokens, 3k-65k prompts, mixed cache/generation | **0.6 GiB** | **0** | no |
+
+CUDA graphs were demonstrably live throughout (2,627 graph warmups in the
+second run), so the absence of flushes is not an absence of graphs. Deliberate
+starvation to 600 MiB free did not produce a single allocation failure.
+
+So the fault remains unexplained and unfixed, and **no upstream issue
+describes our case**. Note also that this run is not evidence of stability:
+385k clean tokens is the same kind of pass the MXFP4 dual gave before faulting
+in production hours later.
+
+Two other open issues do match observations recorded here:
+[#25664](https://github.com/ggml-org/llama.cpp/issues/25664) is our Vulkan
+`DeviceLostError` on DeepSeek V4 Flash, and
+[#26220](https://github.com/ggml-org/llama.cpp/issues/26220) reports up to 2x
+prefill loss on RDNA4 after the rocWMMA removal.
+
 **Related: [antirez/ds4](https://github.com/antirez/ds4)** (DwarfStar) is a
 dedicated DeepSeek V4 engine with Metal/CUDA/ROCm backends. Evaluated
 2026-08-09: it does not help with this fault — different engine, its ROCm
