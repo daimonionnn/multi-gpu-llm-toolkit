@@ -19,16 +19,16 @@
 # in 5 differs from the Q8 reference. For quality use start-deepseek-mxfp4-nvidia-amd-cpu.sh;
 # for raw speed with full model fidelity consider start-gptoss-mxfp4-nvidia.sh.
 #
-# Variants with experts offloaded to system RAM (slower, but verified):
-#   --iq3       IQ3_XXS, 128k, 8 expert layers in RAM   (986 pp / 29 tg)
-#   --iq3-256k  IQ3_XXS, 256k, 10 expert layers in RAM  (531 pp / 22 tg)
+# IQ3_XXS with experts in system RAM now lives in its own profile,
+# start-deepseek-iq3xxs-nvidia-cpu.sh (986 pp / 29 tg at 128k). The --iq3 and
+# --iq3-256k flags here still work; they redirect there.
 #
 # Usage:
 #   ./start-deepseek-iq2xxs-nvidia.sh                # antirez IQ2XXS+Q8, 128k (default)
 #   ./start-deepseek-iq2xxs-nvidia.sh --200k         # IQ1_M, 200k
 #   ./start-deepseek-iq2xxs-nvidia.sh --iq2m         # unsloth UD-IQ2_M, 128k
-#   ./start-deepseek-iq2xxs-nvidia.sh --iq3          # RAM-assisted IQ3
-#   ./start-deepseek-iq2xxs-nvidia.sh --iq3-256k     # RAM-assisted IQ3 at 256k
+#   ./start-deepseek-iq2xxs-nvidia.sh --iq3          # redirects to the IQ3_XXS profile
+#   ./start-deepseek-iq2xxs-nvidia.sh --iq3-256k     # the same, at 256k
 #   ./start-deepseek-iq2xxs-nvidia.sh -- --port 8090 # extra llama-server args
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,20 +60,15 @@ case "${1:-}" in
         MODEL=$(require_unsloth UD-IQ2_M) || exit 1
         MODEL_ARGS=(-c 131072)
         ;;
+    # IQ3_XXS moved to its own profile - a script named for one quant should
+    # not serve another. The flags stay as redirects so nothing breaks.
     --iq3)
         shift
-        MODEL=$(require_unsloth UD-IQ3_XXS) || exit 1
-        # --no-mmap only on the two RAM-assisted variants: llama.cpp asks for it
-        # whenever tensors are overridden to the CPU ("consider using --no-mmap
-        # for better performance"). The all-VRAM profiles below keep mmap, where
-        # it would buy nothing and only slow the load.
-        MODEL_ARGS=(-c 131072 --n-cpu-moe 8 --no-mmap)
+        exec "$SCRIPT_DIR/start-deepseek-iq3xxs-nvidia-cpu.sh" "$@"
         ;;
     --iq3-256k)
         shift
-        # Verified: two consecutive 261900-token prefills incl. a full-cache clear.
-        MODEL=$(require_unsloth UD-IQ3_XXS) || exit 1
-        MODEL_ARGS=(-c 262144 --n-cpu-moe 10 --no-mmap)
+        exec "$SCRIPT_DIR/start-deepseek-iq3xxs-nvidia-cpu.sh" --256k "$@"
         ;;
     *)
         MODEL="$MODEL_ANTIREZ"

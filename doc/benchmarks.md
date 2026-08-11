@@ -285,7 +285,7 @@ the AMD card (`-ot 'blk\.(3[5-9]|4[0-2])\.ffn_.*_exps.*=ROCm0'`) plus
 
 | Quant | Size | Config | pp t/s | tg t/s | Stability |
 |---|---:|---|---:|---:|---|
-| IQ3_XXS | 98 GB | cuda + ncmoe 8 | 936–986 | 29.3 | OK (256k verified) |
+| IQ3_XXS | 98 GB | cuda + ncmoe 8 | 936–986 | 29.3 | OK (256k verified; profile: `start-deepseek-iq3xxs-nvidia-cpu.sh`) |
 | IQ3_XXS | 98 GB | dual `-ot` | — | 57.0 | **HIP fault** at 43k–225k (profile: `start-deepseek-iq3xxs-nvidia-amd.sh`) |
 | MXFP4 | 146 GB | cuda + ncmoe 18 | 299–311 | 16.4 | OK |
 | MXFP4 | 146 GB | dual `-ot` + ncmoe 10 | 480–592 | 21.2–24.6 | **OK** — full gauntlet |
