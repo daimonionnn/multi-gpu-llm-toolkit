@@ -14,8 +14,9 @@
 # Details and the stability matrix: doc/benchmarks.md, DeepSeek section.
 #
 # Usage:
-#   ./start-deepseek-q2kxl-nvidia-amd.sh                # Q2_K_XL, 200k, all-VRAM dual
-#   ./start-deepseek-q2kxl-nvidia-amd.sh --iq3          # IQ3_XXS, 200k - UNSTABLE
+#   ./start-deepseek-q2kxl-nvidia-amd.sh                # Q2_K_XL, 128k, all-VRAM dual
+#   ./start-deepseek-q2kxl-nvidia-amd.sh --200k         # Q2_K_XL at the full 200k
+#   ./start-deepseek-q2kxl-nvidia-amd.sh --iq3          # IQ3_XXS, 128k - UNSTABLE
 #   ./start-deepseek-q2kxl-nvidia-amd.sh -- --port 8090 # extra llama-server args
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,6 +37,17 @@ require_model() {
 # for 13 layers (~26-27 GB) from VRAM. Nothing in system RAM.
 OT_PATTERN='blk\.(3[0-9]|4[0-2])\.ffn_.*_exps.*=ROCm0'
 
+# 128k default, matching the other profiles. 200k still fits - it was the
+# original default - so the smaller window is a consistency choice, not a
+# capacity one. Everything is in VRAM here, so the freed KV space is simply
+# headroom; it was NOT used to move experts back off the AMD card, because that
+# retune has not been measured.
+CTX=131072
+if [[ "${1:-}" == "--200k" ]]; then
+    shift
+    CTX=200000
+fi
+
 if [[ "${1:-}" == "--iq3" ]]; then
     shift
     echo "WARNING: IQ3_XXS experts on the AMD card fault intermittently (HIP IQ kernels)." >&2
@@ -49,7 +61,7 @@ fi
 exec "$SCRIPT_DIR/start-llama-server.sh" --mode rocm-cuda \
     --runtime "$LINUX_ROOT/runtime-rocm-cuda128" -- \
     -m "$MODEL" \
-    -c 200000 \
+    -c "$CTX" \
     -ts 0,1 -ot "$OT_PATTERN" \
     -ngl 99 \
     -fa on \

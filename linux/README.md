@@ -36,6 +36,10 @@ means expert layers are served from system RAM, which is what sets the speed
 of that profile. Both parts name the **default**; flags can select another
 quant or placement (`--cuda-only` on the dual MXFP4 profile, for instance).
 
+Every profile defaults to a **128k context**. Where a larger window still
+fits it stays available behind a flag (`--256k`, `--200k`), and where a
+smaller one is cheaper so does that (`--64k`).
+
 | Script                      | Purpose                                            | Windows equivalent            |
 |-----------------------------|----------------------------------------------------|-------------------------------|
 | `common.sh`                 | Shared helpers (sourced, not run)                  | inline functions              |
@@ -51,7 +55,7 @@ quant or placement (`--cuda-only` on the dual MXFP4 profile, for instance).
 | `start-deepseek-mxfp4-nvidia-amd-cpu.sh`   | DeepSeek V4 Flash, MXFP4 (lossless reference): expert-offload dual + RAM, 128k default (`--256k` for the full window) | — |
 | `start-deepseek-mxfp4-nvidia-cpu.sh` | The same without the AMD card (18 expert layers in RAM) — fault-immune, and what the systemd fallback service runs | — |
 | `start-deepseek-iq2xxs-nvidia.sh`  | DeepSeek V4 Flash entirely on the NVIDIA card (antirez IQ2XXS+Q8-attn/128k; `--iq2m`, `--200k`, `--iq3*`) | — |
-| `start-deepseek-q2kxl-nvidia-amd.sh` | DeepSeek V4 Flash entirely in VRAM across both cards (Q2_K_XL, 200k) | — |
+| `start-deepseek-q2kxl-nvidia-amd.sh` | DeepSeek V4 Flash entirely in VRAM across both cards (Q2_K_XL, 128k; `--200k` for the full window) | — |
 | `start-step37-q4ks-nvidia-amd.sh`           | Step-3.7-Flash Q4_K_S — 104 GB across both cards' VRAM, the true dual-GPU case | — |
 | `start-gptoss-mxfp4-nvidia.sh`           | gpt-oss-120b MXFP4, CUDA-only — fastest model on the rig (258 t/s) | — |
 | `build-cuda12-container.sh` | CUDA backend built with CUDA 12.8 in Docker; merges into a dual runtime | — |

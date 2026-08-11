@@ -537,7 +537,9 @@ more than model size. Second, this is the first configuration in the project
 where the AMD card is **load-bearing rather than optional** — remove it and
 the model does not run at this speed at all.
 
-Profile: `start-step37-q4ks-nvidia-amd.sh` (`--128k` shifts one more expert layer to AMD).
+Profile: `start-step37-q4ks-nvidia-amd.sh`. 128k is the default and already
+carries the extra expert layer on AMD that the bigger KV cache pays for;
+`--64k` is the smaller-window variant.
 
 > **Trap:** unsloth's `UD-Q4_K_XL-R4` (114 GB) will not load in mainline
 > llama.cpp — `tensor 'blk.3.ffn_down_exps.weight' has invalid ggml type 213`.

@@ -14,8 +14,8 @@
 # uses ggml type 213, an ik_llama.cpp extension outside mainline's range.
 #
 # Usage:
-#   ./start-step37-q4ks-nvidia-amd.sh                  # 64k context (default)
-#   ./start-step37-q4ks-nvidia-amd.sh --128k           # 128k, one more expert layer on AMD
+#   ./start-step37-q4ks-nvidia-amd.sh                  # 128k context (default)
+#   ./start-step37-q4ks-nvidia-amd.sh --64k            # 64k, one fewer expert layer on AMD
 #   ./start-step37-q4ks-nvidia-amd.sh -- --port 8090   # extra llama-server args
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,13 +23,16 @@ LINUX_ROOT="$(dirname -- "$SCRIPT_DIR")"
 
 MODEL=/home/matt/.lmstudio/models/stepfun-ai/Step-3.7-Flash-GGUF/Step-3.7-flash-Q4_K_S-00001-of-00003.gguf
 
-CTX=65536
-OT='blk\.(3[5-9]|4[0-4])\.ffn_.*_exps.*=ROCm0'
-if [[ "${1:-}" == "--128k" ]]; then
+# 128k default: the KV cache is bigger on CUDA0, so one more expert layer moves
+# to the AMD card to pay for it. Both variants stay entirely in VRAM - nothing
+# here is served from system RAM, so the context choice costs capacity, not
+# speed, unlike the profiles with a `-cpu` in their name.
+CTX=131072
+OT='blk\.(3[4-9]|4[0-4])\.ffn_.*_exps.*=ROCm0'
+if [[ "${1:-}" == "--64k" ]]; then
     shift
-    # Bigger KV on CUDA0, so shift one more expert layer to the AMD card.
-    CTX=131072
-    OT='blk\.(3[4-9]|4[0-4])\.ffn_.*_exps.*=ROCm0'
+    CTX=65536
+    OT='blk\.(3[5-9]|4[0-4])\.ffn_.*_exps.*=ROCm0'
 fi
 [[ "${1:-}" == "--" ]] && shift
 
