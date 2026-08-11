@@ -59,6 +59,12 @@ elif [[ "${1:-}" == "--cuda-only" ]]; then
 fi
 [[ "${1:-}" == "--" ]] && shift
 
+# --no-mmap is unconditional here because every mode offloads experts to system
+# RAM (--n-cpu-moe 10/12/18), and llama.cpp warns on startup that mmap costs
+# performance whenever tensors are overridden to the CPU. The all-VRAM profiles
+# (start-deepseek-nvidia-amd.sh, start-step37.sh, start-gptoss.sh) deliberately
+# keep mmap: with nothing in host RAM there is nothing to speed up, and the
+# flag would only slow the load and give up page-cache sharing.
 exec "$SCRIPT_DIR/start-llama-server.sh" "${MODE_ARGS[@]}" \
     --runtime "$LINUX_ROOT/runtime-rocm-cuda128" -- \
     -m "$MODEL" \
@@ -66,5 +72,6 @@ exec "$SCRIPT_DIR/start-llama-server.sh" "${MODE_ARGS[@]}" \
     ${OT_ARGS[@]+"${OT_ARGS[@]}"} \
     -ngl 99 \
     -fa on \
+    --no-mmap \
     --jinja \
     "$@"

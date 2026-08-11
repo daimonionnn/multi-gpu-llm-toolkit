@@ -63,13 +63,17 @@ case "${1:-}" in
     --iq3)
         shift
         MODEL=$(require_unsloth UD-IQ3_XXS) || exit 1
-        MODEL_ARGS=(-c 131072 --n-cpu-moe 8)
+        # --no-mmap only on the two RAM-assisted variants: llama.cpp asks for it
+        # whenever tensors are overridden to the CPU ("consider using --no-mmap
+        # for better performance"). The all-VRAM profiles below keep mmap, where
+        # it would buy nothing and only slow the load.
+        MODEL_ARGS=(-c 131072 --n-cpu-moe 8 --no-mmap)
         ;;
     --iq3-256k)
         shift
         # Verified: two consecutive 261900-token prefills incl. a full-cache clear.
         MODEL=$(require_unsloth UD-IQ3_XXS) || exit 1
-        MODEL_ARGS=(-c 262144 --n-cpu-moe 10)
+        MODEL_ARGS=(-c 262144 --n-cpu-moe 10 --no-mmap)
         ;;
     *)
         MODEL="$MODEL_ANTIREZ"
