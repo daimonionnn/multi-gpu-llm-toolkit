@@ -271,8 +271,8 @@ see the quantization table below. The launch profiles are split by placement:
 `start-deepseek-mxfp4.sh` (lossless reference, dual + RAM, 128k default -
 faster than 256k because the smaller KV cache keeps two more expert layers
 off DDR5; `--256k` for the full window),
-`start-deepseek-nvidia.sh` (single-card fits, plus the verified RAM-assisted
-IQ3 configs), `start-deepseek-nvidia-amd.sh` (all-VRAM dual, Q2_K_XL). None of
+`start-deepseek-iq2xxs-nvidia.sh` (single-card fits, plus the verified RAM-assisted
+IQ3 configs), `start-deepseek-q2kxl-nvidia-amd.sh` (all-VRAM dual, Q2_K_XL). None of
 this indicts dual-vendor as such — dense models run the same dual runtimes
 without a hiccup; it is a backend bug exposed by brand-new model support,
 worth retesting after upstream updates.
@@ -464,7 +464,7 @@ router, output head and embeddings stay Q8/F16 — the per-token decision
 machinery keeps its precision while the experts, each seeing a fraction of
 tokens, absorb the loss. Its imatrix is calibrated on chat-v2 traffic, which
 the author says specifically restores tool-calling and instruction-following
-quality. That makes it the default for `start-deepseek-nvidia.sh`, and the
+quality. That makes it the default for `start-deepseek-iq2xxs-nvidia.sh`, and the
 right pick for agent duty among the 2-bit options.
 
 Still, all of these are ~2-bit re-encodes of a QAT model whose experts are
@@ -537,7 +537,7 @@ more than model size. Second, this is the first configuration in the project
 where the AMD card is **load-bearing rather than optional** — remove it and
 the model does not run at this speed at all.
 
-Profile: `start-step37.sh` (`--128k` shifts one more expert layer to AMD).
+Profile: `start-step37-q4ks.sh` (`--128k` shifts one more expert layer to AMD).
 
 > **Trap:** unsloth's `UD-Q4_K_XL-R4` (114 GB) will not load in mainline
 > llama.cpp — `tensor 'blk.3.ffn_down_exps.weight' has invalid ggml type 213`.

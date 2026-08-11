@@ -13,8 +13,8 @@
 # fault is low-rate and probabilistic on the AMD expert path, so passing a
 # gauntlet certifies nothing. Use --cuda-only for anything that must stay up.
 #
-# Sibling profiles: start-deepseek-nvidia.sh (single-card fits),
-# start-deepseek-nvidia-amd.sh (all-VRAM dual). Numbers: doc/benchmarks.md.
+# Sibling profiles: start-deepseek-iq2xxs-nvidia.sh (single-card fits),
+# start-deepseek-q2kxl-nvidia-amd.sh (all-VRAM dual). Numbers: doc/benchmarks.md.
 #
 # Usage:
 #   ./start-deepseek-mxfp4.sh                 # 128k context (default)
@@ -62,8 +62,8 @@ fi
 # --no-mmap is unconditional here because every mode offloads experts to system
 # RAM (--n-cpu-moe 10/12/18), and llama.cpp warns on startup that mmap costs
 # performance whenever tensors are overridden to the CPU. The all-VRAM profiles
-# (start-deepseek-nvidia-amd.sh, start-step37.sh, start-gptoss.sh) deliberately
-# keep mmap: with nothing in host RAM there is nothing to speed up, and the
+# (start-deepseek-q2kxl-nvidia-amd.sh, start-step37-q4ks.sh,
+# start-gptoss-mxfp4.sh) deliberately keep mmap: with nothing in host RAM there is nothing to speed up, and the
 # flag would only slow the load and give up page-cache sharing.
 exec "$SCRIPT_DIR/start-llama-server.sh" "${MODE_ARGS[@]}" \
     --runtime "$LINUX_ROOT/runtime-rocm-cuda128" -- \

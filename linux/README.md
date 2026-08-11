@@ -28,6 +28,10 @@ Everything after `--` goes to `llama-server` untouched — the equivalent of
 
 ## Scripts
 
+Model profiles are named `start-<model>-<quant>[-<placement>].sh`, matching the
+Windows convention (`start-qwen122b-q6k.ps1`), so the quantization is visible
+without opening the file.
+
 | Script                      | Purpose                                            | Windows equivalent            |
 |-----------------------------|----------------------------------------------------|-------------------------------|
 | `common.sh`                 | Shared helpers (sourced, not run)                  | inline functions              |
@@ -42,10 +46,10 @@ Everything after `--` goes to `llama-server` untouched — the equivalent of
 | `start-model-template.sh`   | Model profile template — copy per model            | `start-qwen122b-q6k.ps1` etc. |
 | `start-deepseek-mxfp4.sh`   | DeepSeek V4 Flash, MXFP4 (lossless reference): expert-offload dual + RAM, 128k default (`--256k` for the full window) | — |
 | `start-deepseek-mxfp4-cuda-only.sh` | The same, NVIDIA-only — fault-immune profile the systemd fallback service runs | — |
-| `start-deepseek-nvidia.sh`  | DeepSeek V4 Flash entirely on the NVIDIA card (antirez IQ2XXS+Q8-attn/128k; `--iq2m`, `--200k`, `--iq3*`) | — |
-| `start-deepseek-nvidia-amd.sh` | DeepSeek V4 Flash entirely in VRAM across both cards (Q2_K_XL, 200k) | — |
-| `start-step37.sh`           | Step-3.7-Flash Q4_K_S — 104 GB across both cards' VRAM, the true dual-GPU case | — |
-| `start-gptoss.sh`           | gpt-oss-120b MXFP4, CUDA-only — fastest model on the rig (258 t/s) | — |
+| `start-deepseek-iq2xxs-nvidia.sh`  | DeepSeek V4 Flash entirely on the NVIDIA card (antirez IQ2XXS+Q8-attn/128k; `--iq2m`, `--200k`, `--iq3*`) | — |
+| `start-deepseek-q2kxl-nvidia-amd.sh` | DeepSeek V4 Flash entirely in VRAM across both cards (Q2_K_XL, 200k) | — |
+| `start-step37-q4ks.sh`           | Step-3.7-Flash Q4_K_S — 104 GB across both cards' VRAM, the true dual-GPU case | — |
+| `start-gptoss-mxfp4.sh`           | gpt-oss-120b MXFP4, CUDA-only — fastest model on the rig (258 t/s) | — |
 | `build-cuda12-container.sh` | CUDA backend built with CUDA 12.8 in Docker; merges into a dual runtime | — |
 
 Backend modes match Windows — with `.so` backends in place of `.dll`, plus one

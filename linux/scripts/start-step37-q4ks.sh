@@ -14,9 +14,9 @@
 # uses ggml type 213, an ik_llama.cpp extension outside mainline's range.
 #
 # Usage:
-#   ./start-step37.sh                  # 64k context (default)
-#   ./start-step37.sh --128k           # 128k, one more expert layer on AMD
-#   ./start-step37.sh -- --port 8090   # extra llama-server args
+#   ./start-step37-q4ks.sh                  # 64k context (default)
+#   ./start-step37-q4ks.sh --128k           # 128k, one more expert layer on AMD
+#   ./start-step37-q4ks.sh -- --port 8090   # extra llama-server args
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LINUX_ROOT="$(dirname -- "$SCRIPT_DIR")"

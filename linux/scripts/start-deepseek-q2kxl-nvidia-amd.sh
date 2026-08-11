@@ -14,9 +14,9 @@
 # Details and the stability matrix: doc/benchmarks.md, DeepSeek section.
 #
 # Usage:
-#   ./start-deepseek-nvidia-amd.sh                # Q2_K_XL, 200k, all-VRAM dual
-#   ./start-deepseek-nvidia-amd.sh --iq3          # IQ3_XXS, 200k - UNSTABLE
-#   ./start-deepseek-nvidia-amd.sh -- --port 8090 # extra llama-server args
+#   ./start-deepseek-q2kxl-nvidia-amd.sh                # Q2_K_XL, 200k, all-VRAM dual
+#   ./start-deepseek-q2kxl-nvidia-amd.sh --iq3          # IQ3_XXS, 200k - UNSTABLE
+#   ./start-deepseek-q2kxl-nvidia-amd.sh -- --port 8090 # extra llama-server args
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LINUX_ROOT="$(dirname -- "$SCRIPT_DIR")"

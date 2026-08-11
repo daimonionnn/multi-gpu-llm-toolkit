@@ -17,19 +17,19 @@
 # profile never touches the AMD card. Quality caveat: all of these are ~2-bit
 # re-encodes of a QAT model whose experts are natively ~4.25 bpw, so ~1 token
 # in 5 differs from the Q8 reference. For quality use start-deepseek-mxfp4.sh;
-# for raw speed with full model fidelity consider start-gptoss.sh.
+# for raw speed with full model fidelity consider start-gptoss-mxfp4.sh.
 #
 # Variants with experts offloaded to system RAM (slower, but verified):
 #   --iq3       IQ3_XXS, 128k, 8 expert layers in RAM   (986 pp / 29 tg)
 #   --iq3-256k  IQ3_XXS, 256k, 10 expert layers in RAM  (531 pp / 22 tg)
 #
 # Usage:
-#   ./start-deepseek-nvidia.sh                # antirez IQ2XXS+Q8, 128k (default)
-#   ./start-deepseek-nvidia.sh --200k         # IQ1_M, 200k
-#   ./start-deepseek-nvidia.sh --iq2m         # unsloth UD-IQ2_M, 128k
-#   ./start-deepseek-nvidia.sh --iq3          # RAM-assisted IQ3
-#   ./start-deepseek-nvidia.sh --iq3-256k     # RAM-assisted IQ3 at 256k
-#   ./start-deepseek-nvidia.sh -- --port 8090 # extra llama-server args
+#   ./start-deepseek-iq2xxs-nvidia.sh                # antirez IQ2XXS+Q8, 128k (default)
+#   ./start-deepseek-iq2xxs-nvidia.sh --200k         # IQ1_M, 200k
+#   ./start-deepseek-iq2xxs-nvidia.sh --iq2m         # unsloth UD-IQ2_M, 128k
+#   ./start-deepseek-iq2xxs-nvidia.sh --iq3          # RAM-assisted IQ3
+#   ./start-deepseek-iq2xxs-nvidia.sh --iq3-256k     # RAM-assisted IQ3 at 256k
+#   ./start-deepseek-iq2xxs-nvidia.sh -- --port 8090 # extra llama-server args
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LINUX_ROOT="$(dirname -- "$SCRIPT_DIR")"
