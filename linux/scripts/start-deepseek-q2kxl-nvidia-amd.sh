@@ -8,15 +8,16 @@
 #                        fault rate on the AMD card (the HIP fault is
 #                        probabilistic on all quants - IQ quants fail fast,
 #                        non-IQ rarely but not never; see benchmarks.md)
-#   IQ3_XXS  97.1 GB  <- --iq3: better quality, fits, measured 57 t/s - but
-#                        UNSTABLE: HIP IQ-kernels fault intermittently
+#   IQ3_XXS  97.1 GB  <- start-deepseek-iq3xxs-nvidia-amd.sh: better quality
+#                        and 57 t/s, but UNSTABLE (HIP i-quant kernels).
+#                        `--iq3` here still works, it just redirects there.
 #
 # Details and the stability matrix: doc/benchmarks.md, DeepSeek section.
 #
 # Usage:
 #   ./start-deepseek-q2kxl-nvidia-amd.sh                # Q2_K_XL, 128k, all-VRAM dual
 #   ./start-deepseek-q2kxl-nvidia-amd.sh --200k         # Q2_K_XL at the full 200k
-#   ./start-deepseek-q2kxl-nvidia-amd.sh --iq3          # IQ3_XXS, 128k - UNSTABLE
+#   ./start-deepseek-q2kxl-nvidia-amd.sh --iq3          # redirects to the IQ3_XXS profile
 #   ./start-deepseek-q2kxl-nvidia-amd.sh -- --port 8090 # extra llama-server args
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,14 +49,14 @@ if [[ "${1:-}" == "--200k" ]]; then
     CTX=200000
 fi
 
+# --iq3 used to be handled here, but a script named for one quant serving a
+# different one contradicts the start-<model>-<quant>-<placement> naming. It now
+# lives in its own profile; the flag stays as a redirect so it does not break.
 if [[ "${1:-}" == "--iq3" ]]; then
     shift
-    echo "WARNING: IQ3_XXS experts on the AMD card fault intermittently (HIP IQ kernels)." >&2
-    echo "         Expect a crash somewhere within ~50k-250k tokens of prefill work." >&2
-    MODEL=$(require_model UD-IQ3_XXS) || exit 1
-else
-    MODEL=$(require_model UD-Q2_K_XL) || exit 1
+    exec "$SCRIPT_DIR/start-deepseek-iq3xxs-nvidia-amd.sh" "$@"
 fi
+MODEL=$(require_model UD-Q2_K_XL) || exit 1
 [[ "${1:-}" == "--" ]] && shift
 
 exec "$SCRIPT_DIR/start-llama-server.sh" --mode rocm-cuda \
