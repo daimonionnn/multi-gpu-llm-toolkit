@@ -17,12 +17,12 @@
 # start-deepseek-q2kxl-nvidia-amd.sh (all-VRAM dual). Numbers: doc/benchmarks.md.
 #
 # Usage:
-#   ./start-deepseek-mxfp4.sh                 # 128k context (default)
-#   ./start-deepseek-mxfp4.sh --256k          # full 262144 context, ~20% slower prefill
-#   ./start-deepseek-mxfp4.sh --cuda-only     # no AMD card: slower (pp ~305, tg ~16.4)
+#   ./start-deepseek-mxfp4-nvidia-amd-cpu.sh                 # 128k context (default)
+#   ./start-deepseek-mxfp4-nvidia-amd-cpu.sh --256k          # full 262144 context, ~20% slower prefill
+#   ./start-deepseek-mxfp4-nvidia-amd-cpu.sh --cuda-only     # no AMD card: slower (pp ~305, tg ~16.4)
 #                                             # but immune to the ROCm faults - use
 #                                             # for unattended/fallback service duty
-#   ./start-deepseek-mxfp4.sh -- --port 8090  # extra llama-server args
+#   ./start-deepseek-mxfp4-nvidia-amd-cpu.sh -- --port 8090  # extra llama-server args
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LINUX_ROOT="$(dirname -- "$SCRIPT_DIR")"
@@ -62,8 +62,8 @@ fi
 # --no-mmap is unconditional here because every mode offloads experts to system
 # RAM (--n-cpu-moe 10/12/18), and llama.cpp warns on startup that mmap costs
 # performance whenever tensors are overridden to the CPU. The all-VRAM profiles
-# (start-deepseek-q2kxl-nvidia-amd.sh, start-step37-q4ks.sh,
-# start-gptoss-mxfp4.sh) deliberately keep mmap: with nothing in host RAM there is nothing to speed up, and the
+# (start-deepseek-q2kxl-nvidia-amd.sh, start-step37-q4ks-nvidia-amd.sh,
+# start-gptoss-mxfp4-nvidia.sh) deliberately keep mmap: with nothing in host RAM there is nothing to speed up, and the
 # flag would only slow the load and give up page-cache sharing.
 exec "$SCRIPT_DIR/start-llama-server.sh" "${MODE_ARGS[@]}" \
     --runtime "$LINUX_ROOT/runtime-rocm-cuda128" -- \

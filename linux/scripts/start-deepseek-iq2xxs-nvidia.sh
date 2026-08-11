@@ -16,8 +16,8 @@
 # IQ quants are safe here: the HIP IQ-kernel fault is AMD-only and this
 # profile never touches the AMD card. Quality caveat: all of these are ~2-bit
 # re-encodes of a QAT model whose experts are natively ~4.25 bpw, so ~1 token
-# in 5 differs from the Q8 reference. For quality use start-deepseek-mxfp4.sh;
-# for raw speed with full model fidelity consider start-gptoss-mxfp4.sh.
+# in 5 differs from the Q8 reference. For quality use start-deepseek-mxfp4-nvidia-amd-cpu.sh;
+# for raw speed with full model fidelity consider start-gptoss-mxfp4-nvidia.sh.
 #
 # Variants with experts offloaded to system RAM (slower, but verified):
 #   --iq3       IQ3_XXS, 128k, 8 expert layers in RAM   (986 pp / 29 tg)

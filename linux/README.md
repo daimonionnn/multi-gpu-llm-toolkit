@@ -28,9 +28,13 @@ Everything after `--` goes to `llama-server` untouched — the equivalent of
 
 ## Scripts
 
-Model profiles are named `start-<model>-<quant>[-<placement>].sh`, matching the
-Windows convention (`start-qwen122b-q6k.ps1`), so the quantization is visible
-without opening the file.
+Model profiles are named `start-<model>-<quant>-<placement>.sh`, so both the
+quantization and where the weights actually live are visible without opening
+the file. The placement lists every device that holds part of the model:
+`nvidia`, `nvidia-amd`, `nvidia-cpu`, `nvidia-amd-cpu` — a trailing `cpu`
+means expert layers are served from system RAM, which is what sets the speed
+of that profile. Both parts name the **default**; flags can select another
+quant or placement (`--cuda-only` on the dual MXFP4 profile, for instance).
 
 | Script                      | Purpose                                            | Windows equivalent            |
 |-----------------------------|----------------------------------------------------|-------------------------------|
@@ -44,12 +48,12 @@ without opening the file.
 | `start-open-webui.sh`       | Open WebUI frontend via Docker                     | `start-open-webui.ps1`        |
 | `stop-llama.sh`             | Stop this project's servers and hand the GPUs back | — |
 | `start-model-template.sh`   | Model profile template — copy per model            | `start-qwen122b-q6k.ps1` etc. |
-| `start-deepseek-mxfp4.sh`   | DeepSeek V4 Flash, MXFP4 (lossless reference): expert-offload dual + RAM, 128k default (`--256k` for the full window) | — |
-| `start-deepseek-mxfp4-cuda-only.sh` | The same, NVIDIA-only — fault-immune profile the systemd fallback service runs | — |
+| `start-deepseek-mxfp4-nvidia-amd-cpu.sh`   | DeepSeek V4 Flash, MXFP4 (lossless reference): expert-offload dual + RAM, 128k default (`--256k` for the full window) | — |
+| `start-deepseek-mxfp4-nvidia-cpu.sh` | The same without the AMD card (18 expert layers in RAM) — fault-immune, and what the systemd fallback service runs | — |
 | `start-deepseek-iq2xxs-nvidia.sh`  | DeepSeek V4 Flash entirely on the NVIDIA card (antirez IQ2XXS+Q8-attn/128k; `--iq2m`, `--200k`, `--iq3*`) | — |
 | `start-deepseek-q2kxl-nvidia-amd.sh` | DeepSeek V4 Flash entirely in VRAM across both cards (Q2_K_XL, 200k) | — |
-| `start-step37-q4ks.sh`           | Step-3.7-Flash Q4_K_S — 104 GB across both cards' VRAM, the true dual-GPU case | — |
-| `start-gptoss-mxfp4.sh`           | gpt-oss-120b MXFP4, CUDA-only — fastest model on the rig (258 t/s) | — |
+| `start-step37-q4ks-nvidia-amd.sh`           | Step-3.7-Flash Q4_K_S — 104 GB across both cards' VRAM, the true dual-GPU case | — |
+| `start-gptoss-mxfp4-nvidia.sh`           | gpt-oss-120b MXFP4, CUDA-only — fastest model on the rig (258 t/s) | — |
 | `build-cuda12-container.sh` | CUDA backend built with CUDA 12.8 in Docker; merges into a dual runtime | — |
 
 Backend modes match Windows — with `.so` backends in place of `.dll`, plus one

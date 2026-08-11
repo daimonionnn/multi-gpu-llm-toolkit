@@ -268,7 +268,7 @@ The ROCm backend (gfx1201) faults intermittently under this model's compute:
 CUDA-only passed every killer scenario (130k and 256k double-probes with
 full-cache clears), and the expert-offload dual passed them on non-IQ quants —
 see the quantization table below. The launch profiles are split by placement:
-`start-deepseek-mxfp4.sh` (lossless reference, dual + RAM, 128k default -
+`start-deepseek-mxfp4-nvidia-amd-cpu.sh` (lossless reference, dual + RAM, 128k default -
 faster than 256k because the smaller KV cache keeps two more expert layers
 off DDR5; `--256k` for the full window),
 `start-deepseek-iq2xxs-nvidia.sh` (single-card fits, plus the verified RAM-assisted
@@ -302,7 +302,7 @@ half a million tokens of AMD expert work across three non-IQ quants — while
 > after passing its gauntlet. The bug is **probabilistic on the AMD expert
 > path for all quants**, IQ quants merely failing fastest; a 165k-token
 > gauntlet cannot certify a low-rate fault. Unattended/fallback duty must run
-> CUDA-only (`start-deepseek-mxfp4-cuda-only.sh`).
+> CUDA-only (`start-deepseek-mxfp4-nvidia-cpu.sh`).
 >
 > **Scope narrowed (2026-08-10): it is deepseek4-specific.** gpt-oss-120b
 > (`gpt-oss` arch, 128 experts, native MXFP4) ran the experts of 17 of its 36
@@ -537,7 +537,7 @@ more than model size. Second, this is the first configuration in the project
 where the AMD card is **load-bearing rather than optional** — remove it and
 the model does not run at this speed at all.
 
-Profile: `start-step37-q4ks.sh` (`--128k` shifts one more expert layer to AMD).
+Profile: `start-step37-q4ks-nvidia-amd.sh` (`--128k` shifts one more expert layer to AMD).
 
 > **Trap:** unsloth's `UD-Q4_K_XL-R4` (114 GB) will not load in mainline
 > llama.cpp — `tensor 'blk.3.ffn_down_exps.weight' has invalid ggml type 213`.
