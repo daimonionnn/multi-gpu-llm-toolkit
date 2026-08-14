@@ -129,6 +129,20 @@ The default port is **8081**, where the Windows scripts use llama.cpp's usual
 server socket`. The Windows side keeps 8080 — the clash belongs to one
 machine, not to the project. Override either way with `--port`.
 
+### The fallback service and its port
+
+`start-deepseek-mxfp4-nvidia-cpu.sh` is reachable two ways that land on
+different ports, which is easy to trip over:
+
+| How it is started | Port |
+|---|---|
+| `systemctl --user start deepseek-server` | **8099** — what the hermes fallback expects |
+| running the script by hand | 8081 — the launcher default |
+
+Both run the same profile, so a hand-started server looks healthy while hermes
+still reports the fallback unreachable. For fallback duty use the service: it
+binds 8099 and returns after a reboot (the user has linger enabled).
+
 ## Freeing the GPU
 
 Three different-looking failures are the same situation — something is still
