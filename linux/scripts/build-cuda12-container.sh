@@ -59,6 +59,10 @@ for lib in libcudart libcublas libcublasLt libnccl; do
     src="$(ldconfig -p | grep -oE "/[^ ]*${lib}\.so\.[0-9]+" | head -1)"
     [ -n "$src" ] && cp -a "$src"* /out/ 2>/dev/null || true
 done
+# The container runs as root, so everything in /out lands root-owned. Hand it
+# back, or the host cannot copy it and the EXIT trap cannot delete the temp
+# directory - which made a successful build report failure.
+chown -R "$(stat -c %u:%g /out)" /out
 ' || die "Container build failed."
 
 [[ -x "$WORK/out/llama-server" ]] || die "Build finished but llama-server missing."

@@ -345,6 +345,33 @@ the usual quant ladder into a single sensible choice per size class: MXFP4
 (reference quality, needs dual or CPU offload) or IQ3_XXS (fits one card,
 fastest, lowest quality).
 
+#### Upstream fix status (re-checked 2026-08-12) — still none
+
+98 commits later, nothing fixes it. [#26738](https://github.com/ggml-org/llama.cpp/issues/26738)
+is still open and its fix [#26771](https://github.com/ggml-org/llama.cpp/pull/26771)
+is still unmerged — moot for us either way, see below.
+
+Two commits in that window matter to this configuration, and the first is a
+**risk rather than a fix**:
+
+- `ebb546b7e` "CUDA: only disable CUDA graphs when mul_mat_id actually needs a
+  stream sync" narrows when graphs are switched off around MoE expert matmuls,
+  so graphs are now used in *more* cases on exactly the code path where we
+  fault. Whether that helps or hurts here is unmeasured.
+- `e79e4bf66` drops `-funsafe-math-optimizations` from HIP builds, because
+  `-fassociative-math` reassociates FP reductions and can flip argmax. A
+  correctness fix, not a crash fix, but it changes what runs on the AMD card.
+
+Also worth knowing, though **we are not affected**:
+[#26399](https://github.com/ggml-org/llama.cpp/issues/26399) reports
+`GGML_OP_TOP_K` falling back to CPU on HIP above ~3-4k context, costing 6.4x
+of token generation (15.78 -> 2.47 t/s) on this very model and architecture.
+That reporter runs DeepSeek fully GPU-resident across six MI50s, so routing
+runs on AMD. Our `-ot` layout keeps only expert *weights* on the AMD card
+while attention and the router stay on CUDA0, and the measurements agree:
+21.2-24.6 tg on the dual, and 22.9 tg at 12k context in production, with no
+discontinuity past 4k.
+
 #### Upstream fix status (checked 2026-08-10) — still none
 
 22 commits landed upstream after the build we run; none touches the
