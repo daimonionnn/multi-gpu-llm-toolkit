@@ -375,6 +375,49 @@ clean run moves the estimate of a low-rate probabilistic fault very little.
 What it does establish is that `ebb546b7e`, which widens CUDA-graph use onto
 the MoE path we fault on, did not break anything outright.
 
+#### `-ub` is the prefill lever: +60% for one flag
+
+The mainline profiles never set `-b`/`-ub` either, so they ran on llama.cpp's
+`-b 2048 -ub 512`. Interleaved arms, `-t 24 -tb 24` throughout, contexts
+4k/16k/32k:
+
+| `-b`/`-ub` | pp 4k | pp 16k | pp 32k | tg 4k | notes |
+|-----------|------:|-------:|-------:|------:|-------|
+| 2048 / 512 (default) | 565 | 595 | 597 | 25.5 | |
+| 4096 / 1024 | 833 | 891 | 887 | 25.0 | |
+| **4096 / 2048** | **937** | **947** | **907** | 24.6 | **best; clean in both rounds** |
+| 4096 / 3072 | 898 | — | — | 24.1 | run ended in the HSA fault |
+| 8192 / 4096 | 964 | **OOM** | — | 24.3 | loads, then cannot allocate at 16k |
+| 8192 / 8192 | — | — | — | — | will not load |
+| `--no-op-offload` | 282 | 278 | 272 | 26.3 | diagnostic |
+
+**`-ub 2048` is worth ~+55-60% of prefill and costs nothing in generation.**
+Bigger micro-batches let more tokens share one load of an expert's weights,
+which is the dominant cost when experts live outside the GPU. The ceiling is
+between 2048 and 4096: `-ub 4096` starts, serves 4k, then dies of
+`cuMemCreate ... out of memory` at 16k, because its compute buffers no longer
+fit beside the expert layers at `--n-cpu-moe 10`.
+
+The `--no-op-offload` arm explains the shape of everything else. Prefill falls
+to ~275 — **less than half the default and under a third of the tuned
+figure** — because the batched expert matmuls then run on the CPU instead of
+being shipped to the GPU. That is why threads were worth nothing on prefill
+(§ above) and why `-ub` is worth so much: with op-offload on, the micro-batch
+size sets how well each weight transfer is amortised. Generation is very
+slightly *better* without it (26.3 vs 25.5), which fits — at batch size 1
+there is nothing to amortise, so the transfer is pure overhead.
+
+**This invalidates the mainline side of the ik_llama comparison.** That
+head-to-head gave mainline ~305 pp against ik's 385 and concluded ik wins
+prefill by 26% — but mainline ran there on `-ub 512`, untuned, exactly the
+kind of unfair setup that comparison was itself correcting on ik's behalf. It
+needs re-running with `-ub 2048` on both sides before the verdict means
+anything.
+
+One caveat on the fault column: the `ub4096` row is marked ok because the
+detection grep only looked for `HSA_STATUS`, and that run died of a CUDA OOM
+instead. Corrected here by hand.
+
 #### Threads: worth ~3% on generation, nothing on prefill, and not a fault trigger
 
 The mainline profiles never set `-t`, so the server had been running on
