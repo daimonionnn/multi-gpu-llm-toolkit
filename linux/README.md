@@ -53,10 +53,14 @@ smaller one is cheaper so does that (`--64k`).
 | `stop-llama.sh`             | Stop this project's servers and hand the GPUs back | — |
 | `start-model-template.sh`   | Model profile template — copy per model            | `start-qwen122b-q6k.ps1` etc. |
 | `start-deepseek-mxfp4-nvidia-amd-cpu.sh`   | DeepSeek V4 Flash, MXFP4 (lossless reference): expert-offload dual + RAM, 128k default (`--256k` for the full window) | — |
+| `start-deepseek-mxfp4-nvidia-amd-cpu-128k.sh` | The same at 128k, context in the name (947 pp / 24.6 tg @16k) | — |
+| `start-deepseek-mxfp4-nvidia-amd-cpu-256k.sh` | The same at 256k — 12 expert layers in RAM instead of 10 (839 pp / 21.4 tg @16k) | — |
 | `start-deepseek-mxfp4-nvidia-cpu.sh` | The same without the AMD card (18 expert layers in RAM) — fault-immune, and what the systemd fallback service runs | — |
 | `start-deepseek-iq2xxs-nvidia.sh`  | DeepSeek V4 Flash entirely on the NVIDIA card (antirez IQ2XXS+Q8-attn/128k; `--iq2m`, `--200k`) | — |
 | `start-deepseek-q2kxl-nvidia-amd.sh` | DeepSeek V4 Flash entirely in VRAM across both cards (Q2_K_XL, 128k; `--200k` for the full window) | — |
 | `start-deepseek-iq3xxs-nvidia-cpu.sh` | DeepSeek V4 Flash IQ3_XXS, NVIDIA + 8 expert layers in RAM (986 pp / 29 tg; `--256k`) — the stable way to run this quant | — |
+| `start-deepseek-iq3xxs-nvidia-cpu-128k.sh` | IQ3_XXS at 128k, context in the name | — |
+| `start-deepseek-iq3xxs-nvidia-cpu-256k.sh` | IQ3_XXS at 256k — 10 expert layers in RAM instead of 8 | — |
 | `start-deepseek-iq3xxs-nvidia-amd.sh` | DeepSeek V4 Flash IQ3_XXS all-VRAM across both cards — fastest DeepSeek generation measured (57 t/s) but **crashes**: HIP i-quant fault within 43k–225k prefill tokens | — |
 | `start-step37-q4ks-nvidia-amd.sh`           | Step-3.7-Flash Q4_K_S — 104 GB across both cards' VRAM, the true dual-GPU case | — |
 | `start-gptoss-mxfp4-nvidia.sh`           | gpt-oss-120b MXFP4, CUDA-only — fastest model on the rig (258 t/s) | — |
