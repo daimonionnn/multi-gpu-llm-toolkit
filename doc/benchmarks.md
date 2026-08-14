@@ -375,6 +375,45 @@ clean run moves the estimate of a low-rate probabilistic fault very little.
 What it does establish is that `ebb546b7e`, which widens CUDA-graph use onto
 the MoE path we fault on, did not break anything outright.
 
+#### Threads: worth ~3% on generation, nothing on prefill, and not a fault trigger
+
+The mainline profiles never set `-t`, so the server had been running on
+**4 threads of 24** while 10-12 expert layers were computed on the CPU. On
+ik_llama, 12 -> 24 threads was worth +32% prefill, so this looked like a large
+missed lever.
+
+It is not, and the first measurement of it was misleading. A single 24-thread
+run showed +6.3% pp and +7.1% tg against the 4-thread numbers from earlier the
+same day — but those baselines came from a different server instance, and that
+run also faulted after 3 949 tokens, which made thread count look like a fault
+trigger as well.
+
+Both readings dissolved under an interleaved trial: 3 pairs, alternating 24 and
+4 threads, identical workload (4k + 16k + 32k), ~330 000 prefill tokens total.
+
+| Context | pp @24t | pp @4t | Δ | tg @24t | tg @4t | Δ |
+|--------:|--------:|-------:|--:|--------:|-------:|--:|
+| 4 096 | 564.4 | 561.6 | +0.5% | 25.38 | 24.28 | **+4.5%** |
+| 16 384 | 597.6 | 596.1 | +0.2% | 24.94 | 24.01 | **+3.9%** |
+| 32 768 | 596.8 | 597.2 | −0.1% | 23.93 | 23.45 | **+2.0%** |
+
+**Prefill is identical** — the +6.3% was cross-instance noise. That confirms
+mainline offloads the batched expert matmuls to the GPU (`--op-offload`, on by
+default), so host threads have almost nothing to do during prefill. It is also
+why mainline prefills at ~597 on 4 threads where ik_llama needs 24 to reach
+355: different engines, opposite bottlenecks. **Generation gains 2-4.5%**,
+which is the CPU computing active experts at batch size 1, where 4 threads do
+not saturate DDR5.
+
+**Threads do not trigger the fault.** Three 24-thread runs completed clean, so
+the earlier 3 949-token death was the probabilistic fault doing what it does,
+not a thread effect. (One 32k run at 24 threads returned 289.87 pp / 16.92 tg,
+roughly half — treated as contention and excluded; every other run of that
+cell sits within 1%.)
+
+Worth setting `-t 24 -tb 24` for the ~3% of generation, but it is not the
+missing lever, and the remaining candidates are `-b`/`-ub` and `--op-offload`.
+
 #### Upstream fix status (re-checked 2026-08-12) — still none
 
 98 commits later, nothing fixes it. [#26738](https://github.com/ggml-org/llama.cpp/issues/26738)
