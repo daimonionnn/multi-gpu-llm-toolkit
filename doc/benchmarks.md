@@ -375,6 +375,40 @@ clean run moves the estimate of a low-rate probabilistic fault very little.
 What it does establish is that `ebb546b7e`, which widens CUDA-graph use onto
 the MoE path we fault on, did not break anything outright.
 
+#### Which MXFP4 profile — and is the AMD card still worth having?
+
+Head to head on 2026-08-12, both profiles on `-b 4096 -ub 2048`, back to back,
+single stream:
+
+| Context | cuda-only pp | dual pp | cuda-only tg | dual tg |
+|--------:|-------------:|--------:|-------------:|--------:|
+| 4 096 | **1096.6** | 884.3 | 16.81 | **23.28** |
+| 16 384 | **1172.6** | 948.1 | 17.23 | **22.98** |
+| 32 768 | **1131.5** | *faulted* | 16.97 | *faulted* |
+
+**They disagree, and the disagreement is the whole answer.** CUDA-only
+prefills ~24% faster; the dual generates ~35% faster. Both follow from where
+the expert weights are. Generation is bandwidth-bound — each token reads its
+active experts, and the AMD card serves them from VRAM at ~640 GB/s against
+DDR5's ~75 GB/s, which is worth 23 t/s versus 17. Prefill is now GPU-side work
+(`--op-offload`), where coordinating two backends costs the dual more than the
+second card returns.
+
+So the answer to "can the AMD card go" is **no, but the case for it is
+narrower than it looks on this model**:
+
+- It buys **+35% generation** on DeepSeek MXFP4 — the metric felt token by
+  token, where prefill is a one-off wait.
+- **Step-3.7-Flash Q4_K_S does not fit without it.** 104 GB against 96.6 GB of
+  NVIDIA VRAM; with both cards it runs entirely in VRAM at 2100-2440 pp /
+  78-94 tg.
+- Against that: **every fault on this rig is on the AMD path.** Five today,
+  all on dual profiles, none on CUDA-only across at least as much work.
+
+For anything unattended — the hermes fallback above all — CUDA-only is now
+strictly the right choice, and no longer a compromise: since `-ub 2048` it is
+also the faster of the two at prefill.
+
 #### `-ub` is the prefill lever: +60% for one flag
 
 The mainline profiles never set `-b`/`-ub` either, so they ran on llama.cpp's
