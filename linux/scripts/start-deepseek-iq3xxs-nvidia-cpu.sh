@@ -41,6 +41,11 @@ require_model() {
     exit 1
 }
 
+# -b 4096 -ub 2048 for the same reason as the MXFP4 profile: with experts in
+# host memory, the micro-batch size decides how well each weight transfer to
+# the GPU is amortised. Measured there at +55-60% prefill; carried over here by
+# the same mechanism rather than by its own measurement.
+#
 # --no-mmap because experts are overridden to the CPU, which is exactly the
 # case llama.cpp warns about at startup ("tensor overrides to CPU are used with
 # mmap enabled - consider using --no-mmap for better performance").
@@ -61,5 +66,6 @@ exec "$SCRIPT_DIR/start-llama-server.sh" --mode cuda \
     "${MODEL_ARGS[@]}" \
     -ngl 99 \
     -fa on \
+    -b 4096 -ub 2048 \
     --jinja \
     "$@"

@@ -398,6 +398,24 @@ between 2048 and 4096: `-ub 4096` starts, serves 4k, then dies of
 `cuMemCreate ... out of memory` at 16k, because its compute buffers no longer
 fit beside the expert layers at `--n-cpu-moe 10`.
 
+Carried into the other modes and verified at 16k, since `-ub 4096` had already
+shown that a config can load cleanly and still OOM once a real context is
+allocated:
+
+| Mode | `-ncmoe` | pp with `-ub 2048` | previously |
+|------|---------:|-------------------:|-----------:|
+| default (128k, dual) | 10 | 947 | 595 |
+| `--256k` (dual) | 12 | 839 | — |
+| **`--cuda-only`** | 18 | **1175** | **~305** |
+
+The CUDA-only profile gains **almost 4x**, far more than the dual — and that
+follows from the mechanism rather than contradicting it. It keeps 18 expert
+layers in system RAM against the dual's 10, so a larger share of its work is
+weight transfer, and a larger share is therefore amortised by the bigger
+micro-batch. This is the profile the systemd fallback runs: a 63.5k-token
+hermes conversation now prefills in ~54s instead of ~208s, which moves that
+fallback from marginal to comfortable.
+
 The `--no-op-offload` arm explains the shape of everything else. Prefill falls
 to ~275 — **less than half the default and under a third of the tuned
 figure** — because the batched expert matmuls then run on the CPU instead of

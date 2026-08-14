@@ -59,6 +59,13 @@ elif [[ "${1:-}" == "--cuda-only" ]]; then
 fi
 [[ "${1:-}" == "--" ]] && shift
 
+# -b 4096 -ub 2048 is worth +55-60% of prefill over llama.cpp's 2048/512
+# (937/947/907 against 565/595/597 pp at 4k/16k/32k), at no cost to
+# generation. Larger micro-batches let more tokens share one load of an
+# expert's weights, which is the dominant cost once experts live off the GPU.
+# 2048 and not more: -ub 4096 loads and serves 4k, then cannot allocate at 16k.
+# Numbers in doc/benchmarks.md.
+#
 # --no-mmap is unconditional here because every mode offloads experts to system
 # RAM (--n-cpu-moe 10/12/18), and llama.cpp warns on startup that mmap costs
 # performance whenever tensors are overridden to the CPU. The all-VRAM profiles
@@ -72,6 +79,7 @@ exec "$SCRIPT_DIR/start-llama-server.sh" "${MODE_ARGS[@]}" \
     ${OT_ARGS[@]+"${OT_ARGS[@]}"} \
     -ngl 99 \
     -fa on \
+    -b 4096 -ub 2048 \
     --no-mmap \
     --jinja \
     "$@"
