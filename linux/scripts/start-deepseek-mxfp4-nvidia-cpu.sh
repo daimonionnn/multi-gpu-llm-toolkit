@@ -27,7 +27,15 @@
 #   ./start-deepseek-mxfp4-nvidia-cpu.sh -- --port 9000   # override; last wins
 #   systemctl --user start deepseek-server                # the same, as a service
 
-# A user-supplied --port lands after ours, and llama.cpp takes the last one.
+# --parallel 1: this profile serves one agent, so the default four slots buy
+# nothing and only add ways for requests to interact. Observed on 2026-08-12: a
+# hermes prefill on slot 2 ran at ~800 t/s while benchmark prefills on slot 3
+# ran at ~1265 on the same server. The cause was not established - with
+# kv_unified the slots do not statically divide the cache - but a single-slot
+# server cannot have the problem at all.
+#
+# A user-supplied --port or --parallel lands after ours, and llama.cpp takes
+# the last one.
 [[ "${1:-}" == "--" ]] && shift
 exec "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/start-deepseek-mxfp4-nvidia-amd-cpu.sh" \
-    --cuda-only -- --port 8099 "$@"
+    --cuda-only -- --port 8099 --parallel 1 "$@"
