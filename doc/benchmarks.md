@@ -345,6 +345,36 @@ the usual quant ladder into a single sensible choice per size class: MXFP4
 (reference quality, needs dual or CPU offload) or IQ3_XXS (fits one card,
 fastest, lowest quality).
 
+#### Post-update check (2026-08-12, build 10429 / `77918caf3`)
+
+Re-measured after pulling 98 upstream commits, to confirm the update cost
+nothing. Same rig, MXFP4 expert-offload dual, single stream:
+
+| Context | `-ncmoe` | pp t/s | tg t/s |
+|--------:|---------:|-------:|-------:|
+| 4 096 | 10 | 532.0 | 23.8 |
+| 16 384 | 10 | 597.8 | 22.9 |
+| 32 768 | 10 | 591.5 | 22.8 |
+| 131 072 | 10 | 512.2 | 21.7 |
+| 262 144 | 12 | 387.4 | 18.8 |
+
+Against the recorded baselines — 480-592 pp / 21.2-24.6 tg at 128k and
+386 pp / 18.4 tg at 256k — this is at or just above the range at 128k and
+indistinguishable at 256k. **No regression.** The small gain at 128k must not
+be credited to the update: `--no-mmap` was added in the same window, so two
+variables moved at once.
+
+Generation falls only 23.8 -> 21.7 across a 32x context increase, which is MLA
+doing its job: the compressed KV cache grows slowly enough that depth barely
+touches the bandwidth-bound decode.
+
+**445 725 tokens of prefill through the AMD expert path, zero HSA faults** —
+and that still does not mean the fault is gone. The previous gauntlet was 165k
+tokens, passed, and the same layout died at ~45k in production hours later. A
+clean run moves the estimate of a low-rate probabilistic fault very little.
+What it does establish is that `ebb546b7e`, which widens CUDA-graph use onto
+the MoE path we fault on, did not break anything outright.
+
 #### Upstream fix status (re-checked 2026-08-12) — still none
 
 98 commits later, nothing fixes it. [#26738](https://github.com/ggml-org/llama.cpp/issues/26738)
