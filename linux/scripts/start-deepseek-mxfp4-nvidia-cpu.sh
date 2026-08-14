@@ -11,17 +11,23 @@
 # in system RAM, so more of its work is weight transfer than the dual's, and
 # more of it is amortised by the larger micro-batch.
 #
-# PORTS: running this by hand binds 8081, the launcher default. The hermes
-# fallback looks for 8099, which is the port the systemd unit passes in - so
-# starting it by hand does NOT give hermes a fallback, it gives you a second
-# server somewhere hermes is not looking. For fallback duty always use the
-# service; it also comes back after a reboot.
+# PORT: 8099 whichever way it is started. This profile IS the hermes fallback,
+# and hermes only looks at 8099, so binding the launcher's usual 8081 by hand
+# produced a server that looked perfectly healthy while hermes still reported
+# the fallback unreachable. There is no reason for this one to live anywhere
+# else, so the port is pinned here rather than left to the launcher default.
 #
-#   systemctl --user start deepseek-server     # 8099, what hermes expects
-#   systemctl --user status deepseek-server
+# A consequence worth knowing: if the systemd unit is already running, starting
+# this by hand now fails to bind instead of silently creating a second, useless
+# server. That is the intended behaviour - check with
+# `systemctl --user status deepseek-server` first.
 #
-# Usage (interactive, port 8081):
-#   ./start-deepseek-mxfp4-nvidia-cpu.sh
-#   ./start-deepseek-mxfp4-nvidia-cpu.sh -- --port 8099   # extra llama-server args
+# Usage:
+#   ./start-deepseek-mxfp4-nvidia-cpu.sh                  # port 8099
+#   ./start-deepseek-mxfp4-nvidia-cpu.sh -- --port 9000   # override; last wins
+#   systemctl --user start deepseek-server                # the same, as a service
 
-exec "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/start-deepseek-mxfp4-nvidia-amd-cpu.sh" --cuda-only "$@"
+# A user-supplied --port lands after ours, and llama.cpp takes the last one.
+[[ "${1:-}" == "--" ]] && shift
+exec "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/start-deepseek-mxfp4-nvidia-amd-cpu.sh" \
+    --cuda-only -- --port 8099 "$@"
