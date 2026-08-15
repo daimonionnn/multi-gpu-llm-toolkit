@@ -145,10 +145,28 @@ you can read the exact figure out of a failed load), `-b 4096`:
 | `halo-win` | PCIe 4.0 x4 | ~7 GB/s | ~460 pp | **299** |
 | `dual-linux` | PCIe 5.0 x16 | ~50 GB/s | ~3300 pp | **1175** |
 
-The model is an upper bound, not a predictor — real efficiency landed at 65% and
-36% of it, because transfers overlap with compute and not every expert is
-touched in every batch. What it *does* get right is the ranking and the order of
-magnitude, and that is enough to decide a layout before buying hardware.
+The model is an upper bound, not a predictor — transfers overlap with compute
+and not every expert is touched in every batch. What it *does* get right is the
+ranking and the order of magnitude, which is enough to decide a layout before
+buying hardware.
+
+Run the same arithmetic backwards and it becomes a diagnostic: divide the
+offloaded bytes by the measured time per batch and you get the throughput the
+link actually delivered.
+
+| Rig | pp @16k | s per batch | Implied throughput | Utilisation of… |
+|---|---:|---:|---:|---|
+| `halo-win` | 299 | 13.7 | 4.6 GB/s | 58% of gen4 x4 |
+| `dual-linux` | 1175 | 3.5 | 18.0 GB/s | 57% of gen5 **x8** |
+| | | | | 29% of gen5 x16 |
+
+Two independent rigs landing on the same 57–58% utilisation is what a
+transfer-bound layout looks like. The 29% reading would mean the link was mostly
+idle — and then cutting to four lanes could not have cost 4x, which it did. So
+this arithmetic says `dual-linux` was running its NVIDIA card at **x8**, not the
+x16 recorded in [systems.md](systems.md): a board that splits CPU lanes when the
+second GPU slot is populated. Useful property of a performance model — it can
+tell you your hardware inventory is wrong.
 
 ### Prefill when everything is already on GPUs
 
