@@ -7,10 +7,13 @@ param(
     [string]$Mode = "rocm-cuda"
 )
 
+# GGUF root; override with $env:LLM_MODELS_DIR. Default is LM Studio's download dir.
+$ModelsDir = if ($env:LLM_MODELS_DIR) { $env:LLM_MODELS_DIR } else { "$env:USERPROFILE\.lmstudio\models" }
+
 & "$PSScriptRoot\start-llama-server.ps1" `
     -Mode $Mode `
     -ExtraArgs @(
-        "-m", "C:\Users\matt\.lmstudio\models\mradermacher\Qwen3.5-122B-A10B-GGUF\Qwen3.5-122B-A10B-heretic-v2.Q6_K.gguf",
+        "-m", "$ModelsDir\mradermacher\Qwen3.5-122B-A10B-GGUF\Qwen3.5-122B-A10B-heretic-v2.Q6_K.gguf",
         "-c", "4096",
         "-ngl", "99",
         "--split-mode", "layer",
@@ -20,5 +23,4 @@ param(
         "--flash-attn", "auto",
         "--cache-type-k", "q8_0",
         "--cache-type-v", "q8_0"
-    )
     )

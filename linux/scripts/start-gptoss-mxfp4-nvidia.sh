@@ -8,7 +8,16 @@
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LINUX_ROOT="$(dirname -- "$SCRIPT_DIR")"
 
-MODEL=/home/matt/.lmstudio/models/lmstudio-community/gpt-oss-120b-GGUF/gpt-oss-120b-MXFP4-00001-of-00002.gguf
+# GGUF root; override with LLM_MODELS_DIR. Default is LM Studio's download dir.
+MODELS_DIR="${LLM_MODELS_DIR:-$HOME/.lmstudio/models}"
+
+MODEL="$MODELS_DIR/lmstudio-community/gpt-oss-120b-GGUF/gpt-oss-120b-MXFP4-00001-of-00002.gguf"
+[[ -f "$MODEL" ]] || {
+    echo "Model not found: $MODEL" >&2
+    echo "Download it first, e.g. in LM Studio search 'lmstudio-community gpt-oss-120b MXFP4'" >&2
+    echo 'Or set LLM_MODELS_DIR if your GGUFs live outside $HOME/.lmstudio/models.' >&2
+    exit 1
+}
 
 [[ "${1:-}" == "--" ]] && shift
 exec "$SCRIPT_DIR/start-llama-server.sh" --mode cuda \

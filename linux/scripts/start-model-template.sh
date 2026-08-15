@@ -10,7 +10,11 @@
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-MODEL="/path/to/your-model.gguf"
+# GGUF root; override with LLM_MODELS_DIR. Default is LM Studio's download dir.
+# Keep model paths relative to this so a profile works on any machine.
+MODELS_DIR="${LLM_MODELS_DIR:-$HOME/.lmstudio/models}"
+
+MODEL="$MODELS_DIR/publisher/your-model-GGUF/your-model.gguf"
 
 MODE="rocm-cuda"
 if [[ "${1:-}" == "--mode" ]]; then

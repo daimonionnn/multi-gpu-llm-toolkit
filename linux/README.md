@@ -40,6 +40,14 @@ Every profile defaults to a **128k context**. Where a larger window still
 fits it stays available behind a flag (`--256k`, `--200k`), and where a
 smaller one is cheaper so does that (`--64k`).
 
+Profiles look for their GGUFs under `$HOME/.lmstudio/models`, the directory
+LM Studio downloads into. If yours live elsewhere, point `LLM_MODELS_DIR` at
+the root that holds the `<publisher>/<repo>/` folders — no script edit needed:
+
+```bash
+LLM_MODELS_DIR=/mnt/models ./start-deepseek-mxfp4-nvidia-amd-cpu.sh
+```
+
 | Script                      | Purpose                                            | Windows equivalent            |
 |-----------------------------|----------------------------------------------------|-------------------------------|
 | `common.sh`                 | Shared helpers (sourced, not run)                  | inline functions              |

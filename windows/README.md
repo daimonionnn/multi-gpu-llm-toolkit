@@ -1,6 +1,6 @@
 # Llama Server on Windows (RTX 5090 + AMD Strix Halo iGPU)
 
-> Part of [multi-gpu-llm](../README.md). This is the **Windows** implementation,
+> Part of [multi-gpu-llm-toolkit](../README.md). This is the **Windows** implementation,
 > developed on the **`halo-win`** rig. For Linux, see [../linux/](../linux/).
 
 > **Note:** This project was primarily developed and optimized for an **AMD Strix Halo 395+ with 128GB RAM** paired with one dedicated GPU card, but it can be easily modified or adapted to run on any Windows machine with 2 or more GPUs.
@@ -217,6 +217,13 @@ Profile scripts define model-specific llama-server arguments and accept `-Mode` 
 ```
 
 Each profile script is a thin wrapper that calls `start-llama-server.ps1` with `-Mode` and `-ExtraArgs` containing native llama-server flags (`-m`, `-c`, `-ngl`, `--tensor-split`, etc.).
+
+Profiles look for their GGUFs under `$env:USERPROFILE\.lmstudio\models`, the directory LM Studio downloads into. If yours live elsewhere, point `LLM_MODELS_DIR` at the root that holds the `<publisher>\<repo>\` folders — no script edit needed:
+
+```powershell
+$env:LLM_MODELS_DIR = "D:\models"
+.\scripts\start-qwen122b-q6k.ps1
+```
 
 ### Diagnose HIP memory
 

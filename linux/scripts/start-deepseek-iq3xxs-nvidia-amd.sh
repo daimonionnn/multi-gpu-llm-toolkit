@@ -34,7 +34,10 @@
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LINUX_ROOT="$(dirname -- "$SCRIPT_DIR")"
 
-HF_DIR=/home/matt/.lmstudio/models/unsloth/DeepSeek-V4-Flash-0731-GGUF
+# GGUF root; override with LLM_MODELS_DIR. Default is LM Studio's download dir.
+MODELS_DIR="${LLM_MODELS_DIR:-$HOME/.lmstudio/models}"
+
+HF_DIR="$MODELS_DIR/unsloth/DeepSeek-V4-Flash-0731-GGUF"
 
 # Multi-part names vary by part count; accept any first part for the quant.
 require_model() {
@@ -43,6 +46,7 @@ require_model() {
     [[ -n "$found" ]] && { echo "$found"; return; }
     echo "Model not found: $quant in $HF_DIR" >&2
     echo "Download it first, e.g. in LM Studio search 'unsloth DeepSeek-V4-Flash-0731 $quant'" >&2
+    echo 'Or set LLM_MODELS_DIR if your GGUFs live outside $HOME/.lmstudio/models.' >&2
     exit 1
 }
 

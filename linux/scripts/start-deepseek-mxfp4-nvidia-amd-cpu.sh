@@ -27,7 +27,16 @@
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LINUX_ROOT="$(dirname -- "$SCRIPT_DIR")"
 
-MODEL=/home/matt/.lmstudio/models/lmstudio-community/DeepSeek-V4-Flash-0731-GGUF/DeepSeek-V4-Flash-0731-MXFP4-00001-of-00004.gguf
+# GGUF root; override with LLM_MODELS_DIR. Default is LM Studio's download dir.
+MODELS_DIR="${LLM_MODELS_DIR:-$HOME/.lmstudio/models}"
+
+MODEL="$MODELS_DIR/lmstudio-community/DeepSeek-V4-Flash-0731-GGUF/DeepSeek-V4-Flash-0731-MXFP4-00001-of-00004.gguf"
+[[ -f "$MODEL" ]] || {
+    echo "Model not found: $MODEL" >&2
+    echo "Download it first, e.g. in LM Studio search 'lmstudio-community DeepSeek-V4-Flash-0731 MXFP4'" >&2
+    echo 'Or set LLM_MODELS_DIR if your GGUFs live outside $HOME/.lmstudio/models.' >&2
+    exit 1
+}
 
 # Default: 128k. The smaller KV cache frees VRAM that then holds two more
 # expert layers, so only 10 go to system RAM instead of 12 - and DDR5 at

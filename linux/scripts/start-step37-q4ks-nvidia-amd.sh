@@ -21,7 +21,16 @@
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LINUX_ROOT="$(dirname -- "$SCRIPT_DIR")"
 
-MODEL=/home/matt/.lmstudio/models/stepfun-ai/Step-3.7-Flash-GGUF/Step-3.7-flash-Q4_K_S-00001-of-00003.gguf
+# GGUF root; override with LLM_MODELS_DIR. Default is LM Studio's download dir.
+MODELS_DIR="${LLM_MODELS_DIR:-$HOME/.lmstudio/models}"
+
+MODEL="$MODELS_DIR/stepfun-ai/Step-3.7-Flash-GGUF/Step-3.7-flash-Q4_K_S-00001-of-00003.gguf"
+[[ -f "$MODEL" ]] || {
+    echo "Model not found: $MODEL" >&2
+    echo "Download it first, e.g. in LM Studio search 'stepfun-ai Step-3.7-Flash Q4_K_S'" >&2
+    echo 'Or set LLM_MODELS_DIR if your GGUFs live outside $HOME/.lmstudio/models.' >&2
+    exit 1
+}
 
 # 128k default: the KV cache is bigger on CUDA0, so one more expert layer moves
 # to the AMD card to pay for it. Both variants stay entirely in VRAM - nothing

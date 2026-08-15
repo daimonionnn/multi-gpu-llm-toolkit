@@ -4,10 +4,13 @@ param(
     [string]$Mode = "vulkan-vulkan"
 )
 
+# GGUF root; override with $env:LLM_MODELS_DIR. Default is LM Studio's download dir.
+$ModelsDir = if ($env:LLM_MODELS_DIR) { $env:LLM_MODELS_DIR } else { "$env:USERPROFILE\.lmstudio\models" }
+
 & "$PSScriptRoot\start-llama-server.ps1" `
     -Mode $Mode `
     -ExtraArgs @(
-        "-m", "C:\Users\matt\.lmstudio\models\Jackrong\Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF\Qwen3.5-27B.Q4_K_M.gguf",
+        "-m", "$ModelsDir\Jackrong\Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-v2-GGUF\Qwen3.5-27B.Q4_K_M.gguf",
         "-c", "20000",
         "-ngl", "99",
         "--split-mode", "layer",

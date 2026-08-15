@@ -1,4 +1,4 @@
-# Multi-GPU LLM
+# Multi-GPU LLM Toolkit
 
 Run llama.cpp across **two GPUs of different vendors at the same time** — AMD (ROCm/HIP or Vulkan) together with NVIDIA (CUDA) — in a single `llama-server` process, without an RPC server.
 

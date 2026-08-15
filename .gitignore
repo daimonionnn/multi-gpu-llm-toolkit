@@ -35,5 +35,4 @@ llama.cpp/
 *.zip
 *.original
 *.patched
-$logPath
 webui/
