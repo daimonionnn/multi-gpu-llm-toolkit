@@ -22,13 +22,16 @@ All paths below are relative to this `windows/` directory — run the scripts fr
 | CPU       | AMD Ryzen AI MAX+ 395 (16 cores / 32 threads) |
 | RAM       | 128 GB unified (BIOS UMA split between GPU and OS) |
 | GPU 1     | AMD Radeon 8060S iGPU (RDNA 3.5, gfx1151, VRAM via BIOS UMA, 512-bit bus) |
-| GPU 2     | NVIDIA RTX PRO 6000 Blackwell (96 GB VRAM, compute 12.0, **external over Thunderbolt 5**) |
+| GPU 2     | NVIDIA RTX PRO 6000 Blackwell (96 GB VRAM, compute 12.0, **external over OCuLink, PCIe 4.0 x4**) |
 
 > **Changed 2026-08-15:** the discrete card was RTX 5090 32 GB until this date.
 > Results recorded before it were measured on the 5090. The current card is
-> external over a Thunderbolt 5 tunnel, which `nvidia-smi` presents as
-> `gen4 x4` (~8 GB/s) — that link, not the GPU, is what limits most layouts on
-> this machine. OCuLink did not work yet.
+> external and only **four lanes wide** (~8 GB/s) — that link, not the GPU, is
+> what limits any layout that moves weights during prefill. It ran on a
+> Thunderbolt 5 tunnel first; OCuLink needs **Resizable BAR disabled** in BIOS
+> to enumerate at all, and is worth ~10% of prefill over the tunnel, not the
+> factor the lane count costs. Note `nvidia-smi` reports `gen1` at idle — sample
+> the link during a prefill, where it reads `gen4 x4`.
 
 Full specs and driver versions for both project rigs: [../doc/systems.md](../doc/systems.md).
 
@@ -139,22 +142,22 @@ There are **two independent bugs** affecting HIP memory on Strix Halo. Full deta
 
 **Recommended BIOS setting**: 64 GB UMA (64 GB GPU + 64 GB OS). At this setting Bug 1 is irrelevant and Bug 2 doesn't trigger. Setting 96 GB UMA is broken — see [../doc/rocm-bugs.md](../doc/rocm-bugs.md) for details.
 
-> **The framebuffer size is backend-dependent, not universally "bigger is
-> better".** The recommendation above describes ROCm running a model *entirely*
-> on the iGPU. In a dual layout where the iGPU only holds expert weights and is
-> fed activations by the other card, measurements on this rig (2026-08-15,
-> DeepSeek V4 Flash MXFP4) go the other way for Vulkan:
+> **For a dual layout, use the smallest framebuffer, not the largest.** The
+> recommendation above describes ROCm running a model *entirely* on the iGPU.
+> When the iGPU only holds expert weights and is fed activations by the other
+> card, measurements on this rig (2026-08-15, DeepSeek V4 Flash MXFP4, pp/tg at
+> 16k) go the other way for both backends:
 >
 > | Backend | 1 GB framebuffer | 64 GB framebuffer |
 > |---|---:|---:|
-> | `vulkan-cuda` | **342.6 pp / 33.86 tg** | 188.0 pp / 31.09 tg |
-> | `rocm-cuda` | not measured yet | **468.1 pp / 32.60 tg** |
+> | `rocm-cuda` | **497.5 pp / 36.13 tg** | 468.1 pp / 32.60 tg |
+> | `vulkan-cuda` | **352.1 pp / 34.35 tg** | 188.0 pp / 31.09 tg |
 >
 > A large carve-out is not fully CPU-visible (`isLargeBar: 0`), so host writes
 > into it go through a small BAR window and a staging buffer. Vulkan pays 45% of
-> its prefill for that; HIP does not pay it at all. Note also that a 64 GB
-> carve-out leaves the OS 63.6 GB, which is no longer enough for a CUDA-only
-> profile with ~56 GB of RAM-hosted experts. Full analysis:
+> its prefill for that; HIP does not, but is still faster without the carve-out.
+> A 64 GB carve-out also leaves the OS 63.6 GB, which is no longer enough for a
+> CUDA-only profile with ~56 GB of RAM-hosted experts. Full analysis:
 > [../doc/benchmarks.md](../doc/benchmarks.md).
 
 **Do NOT set** `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1` — `hipMallocManaged` is broken on Strix Halo (gfx1151). See [../doc/rocm-bugs.md](../doc/rocm-bugs.md#known-issue-hipmallocmanaged-is-broken-on-strix-halo).

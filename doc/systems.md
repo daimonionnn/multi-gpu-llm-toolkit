@@ -14,28 +14,28 @@ benchmarks and bug reports.
 | AMD GPU type                  | Integrated (APU)                          | Discrete                                 |
 | AMD memory                    | Shared with system RAM via BIOS UMA split | Dedicated VRAM                           |
 | Total GPU memory              | 96 GB NVIDIA + whatever the UMA split gives the iGPU | 128 GB (32 + 96)              |
-| NVIDIA link                   | Thunderbolt 5 tunnel, ~8 GB/s             | PCIe 5.0 x16, ~64 GB/s                   |
+| NVIDIA link                   | External OCuLink, PCIe 4.0 x4, ~8 GB/s    | PCIe 5.0 x16, ~64 GB/s                   |
 | Largest single-GPU allocation | Limited by GART / `isLargeBar`            | Limited by the card's own VRAM           |
 | BIOS UMA tuning               | Required, and consequential               | Not applicable                           |
 | Dominant failure mode         | Memory *placement* (spills to shared RAM) | Expected: PCIe topology and split tuning |
 
 Both rigs now run an RTX PRO 6000 96 GB, which makes a cross-rig comparison
-tempting and still wrong: one sits in a gen5 x16 slot, the other on a
-Thunderbolt tunnel with an eighth of the bandwidth. That difference alone
-reverses which layout wins, see [benchmarks.md](benchmarks.md).
+tempting and still wrong: one sits in a gen5 x16 slot, the other on four
+external lanes with an eighth of the bandwidth. That difference alone reverses
+which layout wins, see [benchmarks.md](benchmarks.md).
 
 The practical consequence: the ROCm bugs documented for `halo-win` are APU and
 UMA bugs. On `dual-linux` there is no UMA at all, so most of them cannot occur.
 See [rocm-bugs.md](rocm-bugs.md) for the per-bug applicability matrix.
 
-## `halo-win` — AMD Strix Halo + RTX PRO 6000 over Thunderbolt 5 (Windows)
+## `halo-win` — AMD Strix Halo + RTX PRO 6000 over OCuLink (Windows)
 
 | Component | Details |
 |-----------|-----|
 | CPU       | AMD Ryzen AI MAX+ 395 (16 cores / 32 threads) |
 | RAM       | 128 GB unified (split in BIOS between GPU and OS) |
 | GPU 1     | AMD Radeon 8060S iGPU — RDNA 3.5, gfx1151, VRAM via BIOS UMA, 512-bit bus, driver 32.0.31035.1003 |
-| GPU 2     | NVIDIA RTX PRO 6000 Blackwell Workstation Edition — 97887 MiB, compute 12.0, driver 595.79, **external over Thunderbolt 5** |
+| GPU 2     | NVIDIA RTX PRO 6000 Blackwell Workstation Edition — 97887 MiB, compute 12.0, driver 595.79, **external over OCuLink, PCIe 4.0 x4** |
 | OS        | Windows 11 Pro 26200 |
 | AMD stack | HIP SDK 7.1 at `C:\Program Files\AMD\ROCm\7.1` |
 | NVIDIA    | driver only — **no CUDA Toolkit installed** (see below) |
@@ -52,17 +52,26 @@ The swap makes this rig share its discrete GPU model with `dual-linux`, which is
 the first time two rigs here hold anything constant — but they hold it on very
 different links, see below.
 
+The card was **on a Thunderbolt 5 tunnel until later the same day**, when
+OCuLink was made to work. Results tagged TB5 in [benchmarks.md](benchmarks.md)
+are from that window.
+
 ### Verified on this rig
 
-- **The NVIDIA card is on a Thunderbolt 5 tunnel, not a slot.** `nvidia-smi`
-  reports `pcie.link.gen.current 4` / `pcie.link.width.current 4` (max 16) —
-  that is how TB5 presents itself, ~8 GB/s against the PCIe 5.0 x16 (~64 GB/s)
-  the identical card gets on `dual-linux`. OCuLink was tried first and did not
-  work; a different BIOS setting may fix that later. Resizable BAR is enabled in
-  BIOS but does not survive the tunnel: HIP still reports `isLargeBar: 0`.
-  **This link is the single most consequential fact about the rig** — any layout
-  that streams weights across it during prefill is starved, see
-  [benchmarks.md](benchmarks.md).
+- **The NVIDIA card is external, and only four lanes wide.** OCuLink, trained at
+  `gen4 x4` under load — ~8 GB/s against the PCIe 5.0 x16 (~64 GB/s) the
+  identical card gets on `dual-linux`. **This is the single most consequential
+  fact about the rig**: any layout that streams weights across it during prefill
+  is starved, see [benchmarks.md](benchmarks.md).
+- **`pcie.link.gen.current` reads 1 at idle.** The link downclocks when nothing
+  is running, so a bare `nvidia-smi` on an idle box reports gen1 and looks
+  alarming. Sample it *during* a prefill — 14 of 14 samples read `gen4, width 4`.
+  Over the earlier TB5 tunnel it read gen4 even at idle, which is the opposite
+  of what one would guess.
+- **OCuLink only enumerates with Resizable BAR disabled in BIOS.** With ReBAR on
+  it did not come up at all, which is why this rig ran on Thunderbolt first. The
+  practical loss is nil here: HIP reported `isLargeBar: 0` on the iGPU either
+  way, and llama.cpp does not need a large BAR on the NVIDIA card.
 - **No CUDA Toolkit is installed.** `C:\Program Files\NVIDIA GPU Computing
   Toolkit\CUDA\v13.2` and `v13.3` exist but contain only empty `bin`/`lib`
   shells — leftovers of a runtime, with no `nvcc`. `setup-llama.ps1` therefore
@@ -85,33 +94,36 @@ different links, see below.
   the HIP SDK, which is not on the system `PATH`. Without it the runtime loads
   and reports `CUDA0` only — the same silent symptom as the ABI mismatch above.
   `start-llama-server.ps1` now prepends `$HIP_PATH\bin` for ROCm modes.
-- **`GGML_CUDA_NO_PINNED=1` must not be set at a large framebuffer.** It makes
-  the load fail or hang on the iGPU's single large allocation, because unpinned
-  host staging competes with the carve-out for the same physical RAM. Details
-  and the `-AllowPinned` switch in [benchmarks.md](benchmarks.md).
+- **Pinned host memory has to be set per layout, and each setting breaks the
+  other.** `GGML_CUDA_NO_PINNED=1` (the launcher's default for CUDA/HIP modes)
+  makes the dual layouts fail or hang on the iGPU's single large allocation;
+  leaving it unset makes the CUDA-only layout fail on a ~58 GiB *pinned* host
+  buffer, regardless of how much RAM is free. `start-llama-server.ps1` takes
+  `-AllowPinned`; the DeepSeek profile decides it per layout. Details in
+  [benchmarks.md](benchmarks.md).
 - **Port 8080 is occupied** by a service called `AgentService`. Everything here
   runs on 8090.
 
-### BIOS framebuffer: not a single "best" value
+### BIOS framebuffer: leave it at 1 GB
 
-The iGPU carve-out was measured at both extremes with the same model and
-layout, and **the right setting depends on which backend drives the iGPU**:
+Settled by measurement, and the answer is the counter-intuitive one — **the
+smallest carve-out is best for every layout tested here**:
 
-| Framebuffer | Windows sees | `hipInfo` total | Vulkan0 total | Best for |
-|---|---|---|---|---|
-| 1 GB   | 126.6 GB RAM | 76.99 GB | 104773 MiB | Vulkan (`vulkan-cuda`) |
-| 64 GB  | 63.6 GB RAM  | 99.74 GB | 114326 MiB | HIP (`rocm-cuda`) |
+| Framebuffer | Windows sees | `hipInfo` total | ROCm0 / Vulkan0 total | `vulkan-cuda` | `rocm-cuda` |
+|---|---|---|---|---|---|
+| 1 GB   | 126.6 GB RAM | 76.99 GB | 78836 / 104773 MiB | **352 pp / 34.4 tg** | **497 pp / 36.1 tg** |
+| 64 GB  | 63.6 GB RAM  | 99.74 GB | 102129 / 114326 MiB | 188 pp / 31.1 tg | 468 pp / 32.6 tg |
 
 At 64 GB the iGPU's memory is a dedicated carve-out that is not fully
 CPU-visible (`isLargeBar: 0`), so host writes into it go through a small BAR
 window and a staging buffer. The Vulkan backend pays 45% of its prefill for
-that; the HIP backend does not pay it at all. At 1 GB the iGPU runs out of
-ordinary system RAM through GTT, which is fully CPU-visible and needs no
-staging. Numbers in [benchmarks.md](benchmarks.md).
+that; HIP does not pay it at all, which is why the carve-out looked mandatory
+for HIP until it was tested without one. At 1 GB the iGPU runs out of ordinary
+system RAM through GTT, which is fully CPU-visible and needs no staging — and
+HIP allocates its 57.4 GiB there without complaint.
 
-Note the second cost of a large framebuffer: at 64 GB the OS is left with
-63.6 GB, which is no longer enough for the CUDA-only profile's ~56 GB of
-RAM-hosted experts.
+A large carve-out costs twice over: the OS is left with 63.6 GB, which is no
+longer enough for the CUDA-only layout's ~56 GB of RAM-hosted experts.
 
 The older guidance — 64 GB UMA conservative, 96 GB UMA broken — was written for
 ROCm running a model *entirely* on the iGPU, and still applies to that case.

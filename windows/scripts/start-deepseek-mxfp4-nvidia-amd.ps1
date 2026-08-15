@@ -3,29 +3,31 @@
 # The model is QAT with native MXFP4 experts, so this quant IS the original
 # weights; every other quant is equal at best (Q8) or lossy (Q4 and below).
 #
-# Rig: halo-win - Strix Halo 395 + RTX PRO 6000 96 GB over Thunderbolt 5.
+# Rig: halo-win - Strix Halo 395 + RTX PRO 6000 96 GB, external over OCuLink.
 # Two facts about that rig decide this profile, and both invert the tuning that
 # `linux/scripts/start-deepseek-mxfp4-nvidia-amd-cpu.sh` uses on `dual-linux`:
 #
-#   1. The NVIDIA card hangs off a TB5 tunnel (nvidia-smi reports gen4 x4,
-#      ~8 GB/s, against PCIe 5.0 x16 on the Linux rig). Anything that streams
-#      expert weights across it during prefill is starved: CUDA-only with
-#      --n-cpu-moe 18 measures 262 pp here against 1175 pp on `dual-linux` with
-#      the identical flags.
+#   1. The NVIDIA card is four lanes wide (PCIe 4.0 x4, ~8 GB/s, against
+#      PCIe 5.0 x16 on the Linux rig). Anything that streams expert weights
+#      across it during prefill is starved: CUDA-only with --n-cpu-moe 18
+#      measures 299 pp here against 1175 pp on `dual-linux` with identical
+#      flags. That is the lane count, not the cabling - the same layout over a
+#      Thunderbolt 5 tunnel gave 261 pp, so going native bought 15%, not 4x.
 #   2. The AMD iGPU's memory *is* system RAM, so putting the overflow experts
 #      on it costs no bus traffic at all. Nothing needs --n-cpu-moe, and the
 #      146 GB model ends up fully GPU-resident: ~89 GB on CUDA0, ~61 GB on the
 #      iGPU.
 #
-# Measured 2026-08-15, -c 131072, pp/tg at 16k context (doc/benchmarks.md):
+# Measured 2026-08-15, -c 131072, 1 GB BIOS framebuffer, pp/tg at 16k context
+# (full matrix and mechanisms in doc/benchmarks.md):
 #
-#   -Layout rocm-cuda    468.1 pp / 32.60 tg   needs a 64 GB BIOS framebuffer*
-#   -Layout vulkan-cuda  342.6 pp / 33.86 tg   needs a 1 GB BIOS framebuffer
-#   -Layout cuda-only    260.7 pp / 22.70 tg   needs ~56 GB of free system RAM
+#   -Layout rocm-cuda    497.5 pp / 36.13 tg   default; needs a local ggml-hip.dll
+#   -Layout vulkan-cuda  352.1 pp / 34.35 tg   prebuilt only, no HIP build needed
+#   -Layout cuda-only    299.1 pp / 22.93 tg   no iGPU; needs ~56 GB of free RAM
 #
-#   * only because that is where it was measured. Whether HIP also runs at a
-#     1 GB framebuffer is untested; Vulkan definitely does not want 64 GB - it
-#     loses 45% of its prefill to BAR staging there (isLargeBar: 0).
+# Leave the BIOS iGPU framebuffer at its minimum. A 64 GB carve-out is not fully
+# CPU-visible (isLargeBar: 0), which costs Vulkan 45% of its prefill and HIP
+# ~6%, and it leaves the OS too little RAM for the cuda-only layout.
 #
 # Only the expert FFN tensors may go to the iGPU. A classic layer split
 # (`-ts 22,21`, no `-ot`) puts attention on the iGPU too, and llama.cpp then
@@ -38,6 +40,8 @@
 #   .\start-deepseek-mxfp4-nvidia-amd.ps1                        # rocm-cuda dual, 128k
 #   .\start-deepseek-mxfp4-nvidia-amd.ps1 -Layout vulkan-cuda    # no HIP build needed
 #   .\start-deepseek-mxfp4-nvidia-amd.ps1 -Layout cuda-only      # no iGPU at all
+#
+# Serves an OpenAI-compatible API and llama.cpp's own web UI on the same port.
 #   .\start-deepseek-mxfp4-nvidia-amd.ps1 -Port 8091 -ExtraArgs @('--api-key','x')
 
 param(
@@ -126,16 +130,27 @@ $serverArgs = @(
     "--jinja"
 ) + $ExtraArgs
 
-# -AllowPinned is not optional here. The launcher's default for CUDA/HIP modes
-# is GGML_CUDA_NO_PINNED=1, and with a 64 GB BIOS carve-out that leaves the OS
-# 63.6 GB, the unpinned loader's host staging collides with the 57.4 GiB single
-# allocation the iGPU needs: the load either fails outright
-# ("alloc_tensor_range: failed to allocate ROCm0 buffer of size 61605937152")
-# or hangs at exactly that point. Reproduced twice, and loads reliably without
-# the variable.
+# Pinned host memory has to be decided per layout, and both settings break the
+# other layout:
+#
+# - The dual layouts need it ON. The launcher's default for CUDA/HIP modes is
+#   GGML_CUDA_NO_PINNED=1, and with a 64 GB BIOS carve-out that leaves the OS
+#   63.6 GB, unpinned host staging collides with the 57.4 GiB single allocation
+#   the iGPU needs: the load either fails ("alloc_tensor_range: failed to
+#   allocate ROCm0 buffer of size 61605937152") or hangs at exactly that point.
+#
+# - cuda-only needs it OFF. Its RAM-hosted experts are one ~58.4 GiB host
+#   buffer, and pinning that much fails outright ("failed to allocate CUDA_Host
+#   buffer of size 62664998912") even with 112 GB free - it is the size of the
+#   single pinned allocation, not the amount of free memory. Unpinned costs
+#   host-to-device transfer speed, which this layout leans on, so the number to
+#   expect is the one measured with the flag off.
+$pinned = @{}
+if ($Layout -ne "cuda-only") { $pinned["AllowPinned"] = $true }
+
 & (Join-Path $scriptDir "start-llama-server.ps1") `
     -Mode $mode `
     -Port $Port `
     -RuntimeDir $RuntimeDir `
-    -AllowPinned `
+    @pinned `
     -ExtraArgs $serverArgs
