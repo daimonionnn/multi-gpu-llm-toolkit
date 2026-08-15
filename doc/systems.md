@@ -101,6 +101,15 @@ are from that window.
   buffer, regardless of how much RAM is free. `start-llama-server.ps1` takes
   `-AllowPinned`; the DeepSeek profile decides it per layout. Details in
   [benchmarks.md](benchmarks.md).
+- **Measured RAM bandwidth: 83.8 GB/s** at 16 threads with
+  `windows/scripts/membw.c`, the port of the Linux benchmark (same buffer size
+  and repeat count, so the rigs compare directly) — against **89.9 GB/s** on
+  `dual-linux`. The LPDDR5X is *not* faster than that rig's DDR5 by this
+  measure, which cost an earlier revision of [benchmarks.md](benchmarks.md) an
+  explanation. The benchmark is thread-limited rather than bus-limited: 54.3
+  GB/s on 8 threads, 83.8 on 16, 95.4 on 24, 102.5 on 32 — still rising when it
+  runs out of logical CPUs, so treat it as a comparable lower bound rather than
+  the machine's ceiling. Run it with `windows/scripts/run-membw.ps1`.
 - **Port 8080 is occupied** by a service called `AgentService`. Everything here
   runs on 8090.
 

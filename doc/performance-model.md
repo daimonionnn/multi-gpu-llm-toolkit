@@ -97,14 +97,35 @@ Note how brutal the first step is: 0 → 8 layers costs 60%, far more than the
 bandwidth ratio alone predicts, because each off-GPU layer adds synchronisation
 and scheduling cost on top of the slower read.
 
-The same arithmetic run backwards is useful. On this project's two rigs, the
-identical CUDA-only layout (18 RAM-hosted layers) gives **16.4 tg** on
-`dual-linux` (RAM measured at 89.9 GB/s) and **22.9 tg** on `halo-win`. If the
-layout is purely bandwidth-bound, `halo-win`'s effective expert-read bandwidth
-is `89.9 × 22.9/16.4 ≈ 125 GB/s`. That is well below LPDDR5X's nominal figure,
-which suggests scattered expert reads do not stream at peak — and `halo-win`'s
-RAM bandwidth has never been measured directly (there is no Windows port of
-`linux/scripts/membw.c`). Worth doing.
+Running that arithmetic backwards is where it gets interesting — and where it
+caught an error in an earlier revision of this file. The identical CUDA-only
+layout (18 RAM-hosted layers) gives **16.4–17.2 tg** on `dual-linux` and
+**22.9 tg** on `halo-win`, which was attributed here to LPDDR5X being faster
+than DDR5. Then both rigs were measured with the same benchmark
+(`membw.c`, 16 threads, identical buffer and repeat count):
+
+| Rig | Memory | Streaming read |
+|---|---|---:|
+| `dual-linux` | DDR5, 2×64 GB @ 7400 | **89.9 GB/s** |
+| `halo-win` | LPDDR5X (Strix Halo) | **83.8 GB/s** |
+
+By that benchmark the "faster" memory is slower. And a thread sweep accounted
+for part of the rest: `dual-linux`'s figure was taken at 4 threads, and
+`halo-win` at 4 threads gives 20.45 instead of 22.93. What is left is ~22% at
+equal threads, with **no established cause** — candidates are access latency
+rather than streaming bandwidth (expert reads are scattered, not sequential),
+AVX-512 helping the MXFP4 unpack at batch 1, and different llama.cpp builds.
+
+Two lessons worth more than the number itself:
+
+- **A memory benchmark measures a kernel, not a machine.** `membw.c` is
+  thread-limited well below the bus: on `halo-win` it reads 54 GB/s on 8
+  threads, 83.8 on 16, 95.4 on 24 and 102.5 on 32 — still climbing when it runs
+  out of logical CPUs, and far under LPDDR5X's nominal figure. Compare rigs at
+  equal thread counts and treat the result as a lower bound.
+- **Compare configurations, not adjectives.** "Faster RAM" predicted a 40%
+  generation gain that measurement cut to 22%, most of the difference being a
+  flag nobody had set.
 
 ### Prefill when the weights are not on the compute device
 
@@ -172,20 +193,28 @@ constraint, not the connector.**
 (Watch out for one artefact: `nvidia-smi` reports `pcie.link.gen.current 1` when
 the GPU is idle, because the link downclocks. Sample it during a prefill.)
 
-### 3. RAM bandwidth — the generation lever
+### 3. RAM bandwidth — a generation lever, and easy to overstate
 
-Two independent measurements:
+The clean measurement is within one rig, where nothing else moves. `dual-linux`
+went from 4 mixed DIMMs at 6267 MT/s to 2 matched at 7400: measured bandwidth
+74.6 → 89.9 GB/s (**+20.5%**), with a capacity cost (215 → 122 GiB) that stopped
+the 146 GB model fitting the page cache.
 
-- **Across rigs.** The CUDA-only layout generates 16.4 t/s on `dual-linux`
-  (DDR5, 89.9 GB/s) and 22.9 t/s on `halo-win` (LPDDR5X): **+40%** from memory
-  alone, on identical GPU and flags.
-- **Within one rig.** `dual-linux` went from 4 mixed DIMMs at 6267 MT/s to 2
-  matched at 7400: measured bandwidth 74.6 → 89.9 GB/s (**+20.5%**), with a
-  capacity cost that stopped the 146 GB model fitting the page cache.
+**Number of DIMMs is a speed decision, not just a capacity one.** Four populated
+slots force the memory controller to clock down; here dropping to two DIMMs
+raised the achievable clock by 1000 MT/s above the kit's own rating and bought
+20% of bandwidth. On any DDR5 platform, 2 fast DIMMs beat 4 slow ones for
+generation unless you genuinely need the capacity.
+
+The cross-rig comparison is the cautionary tale — see
+[the arithmetic section](#generation): "LPDDR5X vs DDR5" looked like +40% and
+survives as ~22% at equal threads, with the streaming benchmark actually
+favouring the DDR5 rig. Attribute cross-machine differences only after
+equalising the flags.
 
 RAM bandwidth does **not** help prefill in the `--op-offload` layout, because the
-CPU never computes there — the weights are read once and shipped. It is a pure
-generation lever.
+CPU never computes there — the weights are read once and shipped. It is a
+generation lever only.
 
 ### 4. A second GPU — even a weak one, even sharing the same RAM
 
@@ -228,22 +257,23 @@ Measured on `dual-linux` (interleaved, ~330k prefill tokens), 24 threads vs 4:
 | 16 384 | +0.2% | +3.9% |
 | 32 768 | −0.1% | +2.0% |
 
-**Threads are worth nothing on prefill and ~3% on generation.**
+**Threads are worth nothing on prefill and ~3% on generation.** `halo-win`
+reproduces the shape at 4 vs 16 threads: prefill 277.9/305.4 against
+266.4/299.1 (unchanged, 4 threads even marginally ahead), generation 20.45
+against 22.93 — **11%**, larger than on the Intel rig but the same sign.
 
 And if you force the CPU to actually do the work with `--no-op-offload`, on the
 machine with the better CPU:
 
-| `halo-win`, CUDA-only | pp 4k | pp 16k | tg 4k | tg 16k |
+| `halo-win`, CUDA-only, 16 threads | pp 4k | pp 16k | tg 4k | tg 16k |
 |---|---:|---:|---:|---:|
 | `--op-offload` (default) | 266.4 | 299.1 | 23.29 | 22.93 |
-| `--no-op-offload`, 16 threads | 99.4 | 100.1 | 23.85 | 23.68 |
-| `--no-op-offload`, 32 threads | 98.4 | 99.8 | 23.64 | 23.44 |
+| `--no-op-offload` | 99.4 | 100.1 | 23.85 | 23.68 |
 
-**Three times slower**, and SMT adds nothing. Copying 58 GiB of weights across
-four PCIe lanes and computing on a Blackwell is three times faster than
-computing in place on a modern AVX-512 CPU. Generation is 3% *better* without
-op-offload, which fits: at batch 1 there is nothing to amortise, so the transfer
-is pure overhead.
+**Three times slower.** Copying 58 GiB of weights across four PCIe lanes and
+computing on a Blackwell is three times faster than computing in place on a
+modern AVX-512 CPU. Generation is 3% *better* without op-offload, which fits: at
+batch 1 there is nothing to amortise, so the transfer is pure overhead.
 
 The ranking on this rig, then, is not about the link at all — it is about **which
 processor does the expert matmuls**:
@@ -296,6 +326,110 @@ experts active) generates at 78–94 t/s while an 80 GB one (DeepSeek 2-bit, mor
 active weight per token) manages 74.5. **What you read per token decides, not
 what you store.** When choosing a model for a bandwidth-limited rig, look at
 active parameters, not file size.
+
+## Machines: what to expect from a given build
+
+Two of these are measured; the rest are the model applied to hardware this
+project does not have. **Estimates are marked as such** — they are meant for
+deciding what to buy, not for quoting. All assume the same workload as above: a
+146 GB MoE that does not fit one consumer-class card.
+
+| Build | Model fits? | Prefill | Generation | Binding constraint |
+|---|---|---|---|---|
+| **Strix Halo + 96 GB GPU on x4** *(measured)* | No, ~58 GB spills | 497 | 36.1 | iGPU compute, once nothing crosses the link |
+| **Intel + 96 GB GPU on x16 + 32 GB AMD** *(measured)* | No | 480–592 dual, 1175 CPU-offload | 21–25 dual, 16–17 CPU-offload | Link when offloading, AMD card when dual |
+| 9950X + 96 GB GPU on x16, 2 DIMMs *(est.)* | No | ~1100–1200 | ~16–19 | Dual-channel DDR5 on generation |
+| 9950X + 96 GB GPU on x16, 4 DIMMs *(est.)* | No | ~1100–1200 | ~14–17 | Memory clock forced down by DIMM count |
+| Threadripper/EPYC + 96 GB GPU *(est.)* | No | ~1200+ | ~25–35 | Nothing, until the model grows |
+| 2× 96 GB GPUs *(est.)* | **Yes** | thousands | 70+ | Nothing — the case worth aiming at |
+| 2× 32 GB consumer GPUs on x8 *(est.)* | No, ~82 GB spills | ~600–900 | ~12–15 | Amount of spill |
+| Strix Halo alone, no dGPU *(est.)* | Only ≤110 GB models | ~100–200 | ~10–20 | iGPU compute and LPDDR5X |
+
+### Would a Ryzen 9950X help this rig?
+
+This came up directly, with the reasoning: *the Intel rig has no AVX-512 and
+prefills at 1175 while this one has AVX-512 and prefills at 299, so AVX-512 was
+never the point.* That reasoning is **correct**, and the measurements above
+support it twice over — threads are worth 0% on prefill, and forcing the CPU to
+compute the experts is 3x *slower*. A faster CPU of the same core count buys
+approximately nothing.
+
+But the conclusion "so a 9950X would not help" misses which part of the platform
+actually matters. A 9950X is not a CPU swap, it is a **platform swap**, and the
+platform brings the one thing this rig lacks: **PCIe 5.0 x16 to the GPU**. In
+the CPU-offload layout that is precisely the 4x prefill difference measured
+between the two rigs.
+
+What it would cost, though, is everything the Strix Halo brings:
+
+| | halo-win today | 9950X build *(est.)* |
+|---|---|---|
+| Lanes to the GPU | 4 | 16 |
+| Prefill, CPU-offload layout | 299 | ~1100–1200 |
+| Usable second GPU | iGPU with 128 GB of reach | none worth using |
+| Best layout available | experts on the iGPU | experts in RAM |
+| **Prefill, best layout** | **497** | ~1100–1200 |
+| **Generation, best layout** | **36.1** | ~16–19 |
+
+So it is a trade, not an upgrade: **roughly 2–3x the prefill for roughly half the
+generation**. Which side wins depends entirely on the workload — long prompts
+(agents, RAG, code bases) feel prefill; conversation feels generation. On the
+evidence in this repo, the machine that produced 36 t/s on a lossless 146 GB
+model is the more pleasant one to talk to, and the one that prefills a 63k
+conversation in ~2 minutes instead of ~35 seconds is the more painful one to
+wait on.
+
+The DIMM point in that reasoning is right and worth repeating: **four populated
+slots cost memory clock**, and generation is a memory-bandwidth problem.
+`dual-linux` measured exactly this — going from 4 mixed DIMMs to 2 matched ones
+was +20.5% of bandwidth. A 9950X with 4 DIMMs would be the worst of both worlds
+for generation.
+
+If the goal is to fix prefill without giving up generation, the honest answers
+are, in order: **more VRAM so nothing spills**, then **more lanes and more
+memory channels** (Threadripper/EPYC/Xeon-W class), then a wider slot for the
+existing card. A different desktop CPU is not on that list.
+
+### Other builds, and what decides them
+
+- **2× 96 GB GPUs.** The only build here where the 146 GB model fits entirely in
+  VRAM. Everything in this document stops mattering: no link traffic, no CPU
+  involvement, generation limited by VRAM bandwidth (~70+ t/s by analogy with
+  the all-VRAM 2-bit quants measured at 74.5). If the budget exists, this is the
+  answer, and it is the *only* configuration that makes the model cheap on both
+  axes.
+- **2× 32 GB consumer cards.** 64 GB of VRAM against a 146 GB model leaves more
+  spill than `halo-win` has, on links that are usually x8 each. Expect prefill
+  between the two measured rigs and generation below both. Two small cards do
+  not substitute for one large one when the model is this size — what matters is
+  total VRAM, not GPU count.
+- **Threadripper / EPYC / Xeon-W.** The class that removes both constraints at
+  once: x16 per GPU and 4–8 memory channels. Worth it only if the model must
+  spill; if it fits in VRAM, the platform is irrelevant.
+- **Strix Halo alone.** The iGPU can reach all 128 GB, so models up to ~110 GB
+  run with no discrete card at all — but on iGPU compute, which is where the
+  ~100–200 pp estimate comes from. This is the configuration to compare against
+  when asking what the discrete card is worth on this machine: it is worth a
+  great deal for prefill and less for generation.
+- **AMD discrete + NVIDIA discrete** (`dual-linux`). Both cards have real VRAM
+  and real bandwidth, so the expert-offload layout runs at full speed — 480–592
+  pp / 21–25 tg there. Its problem is neither link nor memory but **stability**:
+  every fault recorded in this project is on the AMD path under DeepSeek.
+
+### The general shape
+
+For a model that does not fit one GPU, ranked by what actually determines the
+result:
+
+1. **How much spills** — the single biggest factor for generation. Zero spill is
+   worth 3–4x over heavy spill.
+2. **Whether a second processor can compute on the spill in place** (a second
+   GPU, even an iGPU sharing system RAM) — worth +66% prefill and +58%
+   generation here.
+3. **Link width**, if the spill has to move — 4x prefill between x4 and x16.
+4. **Memory bandwidth and channel count**, for whatever still lives in RAM.
+5. **CPU model, core count, AVX-512** — last, and much further down than it
+   feels like it should be.
 
 ## Traps that look like hardware limits
 

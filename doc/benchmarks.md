@@ -88,8 +88,9 @@ Vulkan dual, and +66% / +58% over CUDA-only. That is the profile default.
 | 8 | as 7 | **OCuLink** | **1 GB** | 481.5 | 497.5 | 487.1 | 35.88 | 36.13 | 34.98 |
 | 9 | as 3 | **OCuLink** | **1 GB** | 338.8 | 352.1 | 351.6 | 35.14 | 34.35 | 34.94 |
 | 10 | as 1, unpinned | **OCuLink** | **1 GB** | 266.4 | 299.1 | 296.1 | 23.29 | 22.93 | 22.93 |
-| 11 | as 10 + `--no-op-offload` (experts computed on the CPU), 16 threads | OCuLink | 1 GB | 99.4 | 100.1 | — | 23.85 | 23.68 | — |
-| 12 | as 11 with `-t 32 -tb 32` | OCuLink | 1 GB | 98.4 | 99.8 | — | 23.64 | 23.44 | — |
+| 11 | as 10 + `--no-op-offload` (experts computed on the CPU) | OCuLink | 1 GB | 99.4 | 100.1 | — | 23.85 | 23.68 | — |
+| 12 | repeat of 11, identical config | OCuLink | 1 GB | 98.4 | 99.8 | — | 23.64 | 23.44 | — |
+| 13 | as 10 with `-t 4 -tb 4` | OCuLink | 1 GB | 277.9 | 305.4 | — | 20.71 | 20.45 | — |
 
 \* row 4's 4k figures are the PTX JIT on the first request: the CUDA 12.4 build
 has no `sm_120` cubins. Its later rows are clean.
@@ -133,18 +134,56 @@ place: this rig has 16 Zen 5 cores with AVX-512 and LPDDR5X, against the Arrow
 Lake in `dual-linux` that has neither. `--no-op-offload` does exactly that
 (rows 11 and 12), and it is **three times worse**:
 
-| CUDA-only, `-ncmoe 18` | pp 4k | pp 16k | tg 4k | tg 16k |
+| CUDA-only, `-ncmoe 18`, 16 threads | pp 4k | pp 16k | tg 4k | tg 16k |
 |---|---:|---:|---:|---:|
 | `--op-offload` (default) | 266.4 | 299.1 | 23.29 | 22.93 |
-| `--no-op-offload`, 16 threads | 99.4 | 100.1 | 23.85 | 23.68 |
-| `--no-op-offload`, 32 threads | 98.4 | 99.8 | 23.64 | 23.44 |
+| `--no-op-offload`, run 1 | 99.4 | 100.1 | 23.85 | 23.68 |
+| `--no-op-offload`, run 2 | 98.4 | 99.8 | 23.64 | 23.44 |
 
 Copying 58 GiB of expert weights across four PCIe lanes and computing on the
-Blackwell beats computing in place on the CPU by 3x, and SMT adds nothing.
-Telemetry confirms the role reversal — during the `--no-op-offload` prefill the
-CPU sits at 72.9% while the GPU idles at 13.7% and 81 W. Generation is 3%
-*better* without op-offload, which fits: at batch 1 there is nothing to amortise,
-so the transfer is pure overhead. `dual-linux` measured the same sign there.
+Blackwell beats computing in place on the CPU by 3x. Telemetry confirms the role
+reversal — during the `--no-op-offload` prefill the CPU sits at 72.9% while the
+GPU idles at 13.7% and 81 W. Generation is 3% *better* without op-offload, which
+fits: at batch 1 there is nothing to amortise, so the transfer is pure overhead.
+`dual-linux` measured the same sign there.
+
+(The two `--no-op-offload` rows were meant to be a 16 vs 32 thread comparison.
+They are not: `-t` was passed through `Start-Process -ArgumentList` and never
+reached `llama-server`, which logged `n_threads = 16` in both. They stand as a
+repeatability check — 1% — and the thread question is answered by row 13
+instead, launched directly.)
+
+#### Threads: nothing on prefill, 11% on generation
+
+Row 13 against row 10, `-t 4 -tb 4` against the default 16, verified in the log:
+
+| Threads | pp 4k | pp 16k | tg 4k | tg 16k |
+|---:|---:|---:|---:|---:|
+| 4 | 277.9 | 305.4 | 20.71 | 20.45 |
+| 16 | 266.4 | 299.1 | 23.29 | 22.93 |
+
+**Prefill is unchanged** (4 threads is even marginally ahead, within noise) —
+the same result `dual-linux` got, and for the same reason: with `--op-offload`
+the host threads have almost nothing to do during prefill. Generation gains
+**11%**, more than the 2–4.5% measured on `dual-linux`, but the same shape.
+
+This matters for one cross-rig claim that was overstated in an earlier revision
+of this file. `halo-win` generating at 22.9 against `dual-linux`'s 16.4-17.2 in
+the identical layout was attributed to LPDDR5X against DDR5. Two measurements
+later that is not supportable:
+
+- the `dual-linux` figure was taken at **4 threads** (its profiles never set
+  `-t`), and this rig at 4 threads gives 20.45, so part of the gap is thread
+  count, not memory;
+- `windows/scripts/membw.c`, a port of the Linux benchmark with identical buffer
+  size and repeat count, measures **83.8 GB/s at 16 threads here against 89.9
+  GB/s** on `dual-linux`. By that benchmark this rig's memory is *slower*.
+
+What survives is a ~22% generation advantage at equal threads whose cause is
+**not established**. Candidates: access latency rather than streaming bandwidth
+(expert reads are scattered, not sequential), AVX-512 helping the MXFP4 unpack
+at batch 1, or the different llama.cpp builds. Not worth guessing about in a
+file of measurements.
 
 The ranking that matters is therefore not about the link but about **which
 processor does the expert matmuls**: a second GPU that owns the memory (497 pp)
