@@ -113,3 +113,14 @@ These apply across platforms and are the reason both live in one repo:
 - [ ] Linux: tune `--tensor-split` for the 3:1 VRAM asymmetry
 - [ ] Benchmarks for each rig
 - [ ] Stand up the `halo-linux` rig for a real same-hardware OS comparison
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+One file needs naming separately:
+[`linux/patches/0001-cuda-fa-exempt-blackwell-from-ada-mma-heuristic.patch`](linux/patches/)
+is a diff against [llama.cpp](https://github.com/ggml-org/llama.cpp) and therefore
+carries lines from it. Those lines stay under llama.cpp's own MIT license, held by
+the ggml authors. llama.cpp is not vendored in this repository — `setup-llama.sh`
+clones it at build time and the checkout is gitignored.
