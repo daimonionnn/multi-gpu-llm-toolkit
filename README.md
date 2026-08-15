@@ -76,6 +76,7 @@ can coexist and you switch between them at launch time rather than rebuilding.
 
 These apply across platforms and are the reason both live in one repo:
 
+- **[doc/performance-model.md](doc/performance-model.md)** — what actually limits prefill and generation: the mechanisms, the arithmetic to predict a rig before buying it, what every flag does, and what each hardware change was measured to be worth
 - **[doc/systems.md](doc/systems.md)** — the test rigs, in detail
 - **[doc/benchmarks.md](doc/benchmarks.md)** — results, keyed by rig and backend, plus what the metrics actually mean
 - **[doc/rocm-bugs.md](doc/rocm-bugs.md)** — ROCm/HIP memory bugs, with a per-bug matrix of which hardware and OS each one affects

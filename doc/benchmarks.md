@@ -1,5 +1,10 @@
 # Benchmarks
 
+For *why* these numbers come out the way they do — the mechanisms behind prefill
+and generation, and how to predict a configuration before measuring it — see
+[performance-model.md](performance-model.md). This file is the evidence; that
+one is the theory.
+
 Results are grouped by **rig**, because the two test machines are not
 comparable hardware — see [systems.md](systems.md). A number from `halo-win`
 says nothing about what `dual-linux` will do, and vice versa. Treat any
@@ -83,6 +88,8 @@ Vulkan dual, and +66% / +58% over CUDA-only. That is the profile default.
 | 8 | as 7 | **OCuLink** | **1 GB** | 481.5 | 497.5 | 487.1 | 35.88 | 36.13 | 34.98 |
 | 9 | as 3 | **OCuLink** | **1 GB** | 338.8 | 352.1 | 351.6 | 35.14 | 34.35 | 34.94 |
 | 10 | as 1, unpinned | **OCuLink** | **1 GB** | 266.4 | 299.1 | 296.1 | 23.29 | 22.93 | 22.93 |
+| 11 | as 10 + `--no-op-offload` (experts computed on the CPU), 16 threads | OCuLink | 1 GB | 99.4 | 100.1 | — | 23.85 | 23.68 | — |
+| 12 | as 11 with `-t 32 -tb 32` | OCuLink | 1 GB | 98.4 | 99.8 | — | 23.64 | 23.44 | — |
 
 \* row 4's 4k figures are the PTX JIT on the first request: the CUDA 12.4 build
 has no `sm_120` cubins. Its later rows are clean.
@@ -118,6 +125,30 @@ so the link is worth slightly more than the 15%.)
 So the tuning that wins on `dual-linux` — keep experts in RAM, buy prefill back
 with a bigger `-ub` — is the wrong shape here. **Nothing may cross the link
 during prefill.**
+
+#### …but the CPU is not the alternative, AVX-512 or not
+
+The obvious reply to a starved link is to stop shipping weights and compute in
+place: this rig has 16 Zen 5 cores with AVX-512 and LPDDR5X, against the Arrow
+Lake in `dual-linux` that has neither. `--no-op-offload` does exactly that
+(rows 11 and 12), and it is **three times worse**:
+
+| CUDA-only, `-ncmoe 18` | pp 4k | pp 16k | tg 4k | tg 16k |
+|---|---:|---:|---:|---:|
+| `--op-offload` (default) | 266.4 | 299.1 | 23.29 | 22.93 |
+| `--no-op-offload`, 16 threads | 99.4 | 100.1 | 23.85 | 23.68 |
+| `--no-op-offload`, 32 threads | 98.4 | 99.8 | 23.64 | 23.44 |
+
+Copying 58 GiB of expert weights across four PCIe lanes and computing on the
+Blackwell beats computing in place on the CPU by 3x, and SMT adds nothing.
+Telemetry confirms the role reversal — during the `--no-op-offload` prefill the
+CPU sits at 72.9% while the GPU idles at 13.7% and 81 W. Generation is 3%
+*better* without op-offload, which fits: at batch 1 there is nothing to amortise,
+so the transfer is pure overhead. `dual-linux` measured the same sign there.
+
+The ranking that matters is therefore not about the link but about **which
+processor does the expert matmuls**: a second GPU that owns the memory (497 pp)
+beats shipping to the big GPU (299 pp) beats the CPU (100 pp).
 
 ### The layout that follows: zero CPU offload
 
