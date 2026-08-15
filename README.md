@@ -47,7 +47,7 @@ Windows-vs-Linux comparison**. Results are keyed by rig, never by OS.
 
 | Rig                        | OS      | CPU / platform               | GPU 1                                    | GPU 2                                 | Memory model                   |
 |----------------------------|---------|------------------------------|------------------------------------------|---------------------------------------|--------------------------------|
-| **halo-win**               | Windows | AMD Ryzen AI MAX+ 395        | AMD Radeon 8060S iGPU (gfx1151, UMA)     | NVIDIA RTX 5090 (32 GB)               | 128 GB unified, BIOS UMA split |
+| **halo-win**               | Windows | AMD Ryzen AI MAX+ 395        | AMD Radeon 8060S iGPU (gfx1151, UMA)     | NVIDIA RTX PRO 6000 (96 GB, **Thunderbolt 5**) | 128 GB unified, BIOS UMA split |
 | **dual-linux**             | Linux   | Intel Core Ultra 7 270K Plus | AMD Radeon AI PRO R9700 (gfx1201, 32 GB) | NVIDIA RTX PRO 6000 Blackwell (96 GB) | Discrete VRAM, no UMA          |
 | **halo-linux** *(planned)* | Linux   | AMD Ryzen AI MAX+ 395        | same hardware as halo-win                | same hardware as halo-win             | 128 GB unified, BIOS UMA split |
 
@@ -101,6 +101,11 @@ These apply across platforms and are the reason both live in one repo:
 
 - [x] Windows: `rocm-cuda`, `vulkan`, `vulkan-vulkan`, `vulkan-cuda` building and serving
 - [x] Windows: `isLargeBar` binary patch for >64 GB UMA
+- [x] Windows: RTX 5090 replaced by RTX PRO 6000 96 GB over Thunderbolt 5 (2026-08-15)
+- [x] Windows: DeepSeek V4 Flash MXFP4 (146 GB) served **fully GPU-resident** — experts of 18 layers on the iGPU, no CPU offload; 468 pp / 32.6 tg on `rocm-cuda`
+- [x] Windows: runtimes assembled from upstream prebuilt backend DLLs, no CUDA Toolkit needed
+- [ ] Windows: settle the BIOS framebuffer — it turns out to be backend-dependent (Vulkan wants 1 GB, HIP does not care)
+- [ ] Windows: measure anything other than DeepSeek on the new card
 - [x] Linux: build and launch scripts ported to bash, detection and error paths verified on the rig
 - [x] Linux: confirmed ROCm supports the R9700 natively as `gfx1201` — no `HSA_OVERRIDE_GFX_VERSION` needed
 - [x] Linux: confirmed the APU/UMA bugs cannot occur on discrete cards (matrix in `doc/rocm-bugs.md`)

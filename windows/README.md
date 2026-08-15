@@ -1,4 +1,4 @@
-# Llama Server on Windows (RTX 5090 + AMD Strix Halo iGPU)
+# Llama Server on Windows (RTX PRO 6000 + AMD Strix Halo iGPU)
 
 > Part of [multi-gpu-llm-toolkit](../README.md). This is the **Windows** implementation,
 > developed on the **`halo-win`** rig. For Linux, see [../linux/](../linux/).
@@ -19,10 +19,16 @@ All paths below are relative to this `windows/` directory — run the scripts fr
 
 | Component | Details |
 |-----------|-----|
-| CPU       | AMD Ryzen AI MAX+ 395 (32 threads) |
-| RAM       | 128 GB unified (64 GB GPU + 64 GB OS) |
-| GPU 1     | AMD Radeon 8060S iGPU (RDNA 3.5, gfx1151, 64 GiB VRAM via BIOS UMA, 512-bit bus) |
-| GPU 2     | NVIDIA GeForce RTX 5090 (32 GB VRAM, compute 12.0, PCIe 4.0 x4) |
+| CPU       | AMD Ryzen AI MAX+ 395 (16 cores / 32 threads) |
+| RAM       | 128 GB unified (BIOS UMA split between GPU and OS) |
+| GPU 1     | AMD Radeon 8060S iGPU (RDNA 3.5, gfx1151, VRAM via BIOS UMA, 512-bit bus) |
+| GPU 2     | NVIDIA RTX PRO 6000 Blackwell (96 GB VRAM, compute 12.0, **external over Thunderbolt 5**) |
+
+> **Changed 2026-08-15:** the discrete card was RTX 5090 32 GB until this date.
+> Results recorded before it were measured on the 5090. The current card is
+> external over a Thunderbolt 5 tunnel, which `nvidia-smi` presents as
+> `gen4 x4` (~8 GB/s) — that link, not the GPU, is what limits most layouts on
+> this machine. OCuLink did not work yet.
 
 Full specs and driver versions for both project rigs: [../doc/systems.md](../doc/systems.md).
 
@@ -42,6 +48,37 @@ Full specs and driver versions for both project rigs: [../doc/systems.md](../doc
 **Vulkan** is a simpler alternative — no HIP SDK needed, no `amdhip64_7.dll` patch, and a single `ggml-vulkan.dll` can drive both AMD and NVIDIA GPUs. May also avoid the ROCm memory bugs.
 
 
+
+## Runtimes without a compiler (prebuilt mixing)
+
+Building is not the only way to get a runtime, and on the current rig it is not
+even possible for CUDA — no CUDA Toolkit is installed, only driver leftovers,
+so `setup-llama.ps1` stops at `Require-Command nvcc`.
+
+Upstream's Windows release zips are built with `GGML_BACKEND_DL`, so backend
+DLLs **from the same build number** can be mixed by copying them into one
+directory. `llama-server.exe` then loads every `ggml-*.dll` it finds next to
+itself and enumerates all of them:
+
+```powershell
+# release + matching cudart, extracted into windows\runtime-cuda133\
+# then one file makes it dual-vendor:
+Copy-Item .\runtime-vulkan\ggml-vulkan.dll .\runtime-vulkan-cuda133\
+.\runtime-vulkan-cuda133\llama-server.exe --list-devices
+#   CUDA0: NVIDIA RTX PRO 6000 Blackwell ...
+#   Vulkan0: AMD Radeon(TM) 8060S Graphics ...
+#   Vulkan1: NVIDIA RTX PRO 6000 Blackwell ...
+```
+
+Point any script at such a directory with `-RuntimeDir`.
+
+**The upstream ROCm zip is the exception** — `llama-b*-bin-win-rocm-*.zip`
+lists no devices on this machine even though its `ggml-hip.dll` does contain
+gfx1151; it is ABI incompatible with the installed HIP SDK 7.1. Compile that one
+DLL locally (single arch, a few minutes, needs `vcvars64.bat` imported first —
+ROCm's clang cannot find `msvcrtd.lib` on its own) and drop it beside the
+prebuilt CUDA runtime. Recipe in
+[../doc/benchmarks.md](../doc/benchmarks.md#assembling-runtimes-without-a-compiler).
 
 ## Recommended Modes on Windows (AMD Strix Halo + Dedicated GPU)
 
@@ -101,6 +138,24 @@ There are **two independent bugs** affecting HIP memory on Strix Halo. Full deta
 | **Bug 2: KV cache spill** | Places KV cache in slow shared memory at 96 GB UMA ([#18011](https://github.com/ggml-org/llama.cpp/issues/18011)) | No user-side fix on Windows — use 64 GB UMA instead |
 
 **Recommended BIOS setting**: 64 GB UMA (64 GB GPU + 64 GB OS). At this setting Bug 1 is irrelevant and Bug 2 doesn't trigger. Setting 96 GB UMA is broken — see [../doc/rocm-bugs.md](../doc/rocm-bugs.md) for details.
+
+> **The framebuffer size is backend-dependent, not universally "bigger is
+> better".** The recommendation above describes ROCm running a model *entirely*
+> on the iGPU. In a dual layout where the iGPU only holds expert weights and is
+> fed activations by the other card, measurements on this rig (2026-08-15,
+> DeepSeek V4 Flash MXFP4) go the other way for Vulkan:
+>
+> | Backend | 1 GB framebuffer | 64 GB framebuffer |
+> |---|---:|---:|
+> | `vulkan-cuda` | **342.6 pp / 33.86 tg** | 188.0 pp / 31.09 tg |
+> | `rocm-cuda` | not measured yet | **468.1 pp / 32.60 tg** |
+>
+> A large carve-out is not fully CPU-visible (`isLargeBar: 0`), so host writes
+> into it go through a small BAR window and a staging buffer. Vulkan pays 45% of
+> its prefill for that; HIP does not pay it at all. Note also that a 64 GB
+> carve-out leaves the OS 63.6 GB, which is no longer enough for a CUDA-only
+> profile with ~56 GB of RAM-hosted experts. Full analysis:
+> [../doc/benchmarks.md](../doc/benchmarks.md).
 
 **Do NOT set** `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1` — `hipMallocManaged` is broken on Strix Halo (gfx1151). See [../doc/rocm-bugs.md](../doc/rocm-bugs.md#known-issue-hipmallocmanaged-is-broken-on-strix-halo).
 
@@ -206,6 +261,9 @@ There are **two independent bugs** affecting HIP memory on Strix Halo. Full deta
 Profile scripts define model-specific llama-server arguments and accept `-Mode` to switch GPU backends:
 
 ```powershell
+.\scripts\start-deepseek-mxfp4-nvidia-amd.ps1                   # dual, experts on the iGPU
+.\scripts\start-deepseek-mxfp4-nvidia-amd.ps1 -CudaOnly         # fallback, experts in system RAM
+
 .\scripts\start-minimax-2.5-mxfp4.ps1                          # vulkan-vulkan (default)
 .\scripts\start-minimax-2.5-mxfp4.ps1 -Mode rocm-cuda          # ROCm+CUDA
 

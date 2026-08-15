@@ -13,30 +13,110 @@ benchmarks and bug reports.
 |-------------------------------|-------------------------------------------|------------------------------------------|
 | AMD GPU type                  | Integrated (APU)                          | Discrete                                 |
 | AMD memory                    | Shared with system RAM via BIOS UMA split | Dedicated VRAM                           |
-| Total GPU memory              | ~96 GB (64 UMA + 32)                      | 128 GB (32 + 96)                         |
+| Total GPU memory              | 96 GB NVIDIA + whatever the UMA split gives the iGPU | 128 GB (32 + 96)              |
+| NVIDIA link                   | Thunderbolt 5 tunnel, ~8 GB/s             | PCIe 5.0 x16, ~64 GB/s                   |
 | Largest single-GPU allocation | Limited by GART / `isLargeBar`            | Limited by the card's own VRAM           |
 | BIOS UMA tuning               | Required, and consequential               | Not applicable                           |
 | Dominant failure mode         | Memory *placement* (spills to shared RAM) | Expected: PCIe topology and split tuning |
+
+Both rigs now run an RTX PRO 6000 96 GB, which makes a cross-rig comparison
+tempting and still wrong: one sits in a gen5 x16 slot, the other on a
+Thunderbolt tunnel with an eighth of the bandwidth. That difference alone
+reverses which layout wins, see [benchmarks.md](benchmarks.md).
 
 The practical consequence: the ROCm bugs documented for `halo-win` are APU and
 UMA bugs. On `dual-linux` there is no UMA at all, so most of them cannot occur.
 See [rocm-bugs.md](rocm-bugs.md) for the per-bug applicability matrix.
 
-## `halo-win` — AMD Strix Halo + RTX 5090 (Windows)
+## `halo-win` — AMD Strix Halo + RTX PRO 6000 over Thunderbolt 5 (Windows)
 
 | Component | Details |
 |-----------|-----|
-| CPU       | AMD Ryzen AI MAX+ 395 (32 threads) |
+| CPU       | AMD Ryzen AI MAX+ 395 (16 cores / 32 threads) |
 | RAM       | 128 GB unified (split in BIOS between GPU and OS) |
-| GPU 1     | AMD Radeon 8060S iGPU — RDNA 3.5, gfx1151, VRAM via BIOS UMA, 512-bit bus |
-| GPU 2     | NVIDIA GeForce RTX 5090 — 32 GB, compute 12.0, PCIe 4.0 x4 |
-| OS        | Windows 11 |
-| AMD stack | HIP SDK 7.1.1 (AMD Software PRO Edition 26.Q1) |
-| NVIDIA    | CUDA Toolkit 13.2 |
+| GPU 1     | AMD Radeon 8060S iGPU — RDNA 3.5, gfx1151, VRAM via BIOS UMA, 512-bit bus, driver 32.0.31035.1003 |
+| GPU 2     | NVIDIA RTX PRO 6000 Blackwell Workstation Edition — 97887 MiB, compute 12.0, driver 595.79, **external over Thunderbolt 5** |
+| OS        | Windows 11 Pro 26200 |
+| AMD stack | HIP SDK 7.1 at `C:\Program Files\AMD\ROCm\7.1` |
+| NVIDIA    | driver only — **no CUDA Toolkit installed** (see below) |
+| Other     | Vulkan SDK 1.4.341.1, MSVC 14.44 and 14.51, VS 18 Enterprise + VS 2022 BuildTools |
 
-BIOS UMA split is the single most important setting on this rig. 64 GB UMA
-(64 GPU / 64 OS) is the conservative baseline; 96 GB UMA triggers the memory
-bugs. Details in [rocm-bugs.md](rocm-bugs.md).
+### Hardware history
+
+The discrete card was **swapped on 2026-08-15**: RTX 5090 32 GB → RTX PRO 6000
+96 GB. Anything in this repo recorded against `halo-win` before that date was
+measured with the 5090; the AMD-side observations (UMA bugs, the `isLargeBar`
+patch) are properties of the APU and carry over, the NVIDIA-side ones do not.
+
+The swap makes this rig share its discrete GPU model with `dual-linux`, which is
+the first time two rigs here hold anything constant — but they hold it on very
+different links, see below.
+
+### Verified on this rig
+
+- **The NVIDIA card is on a Thunderbolt 5 tunnel, not a slot.** `nvidia-smi`
+  reports `pcie.link.gen.current 4` / `pcie.link.width.current 4` (max 16) —
+  that is how TB5 presents itself, ~8 GB/s against the PCIe 5.0 x16 (~64 GB/s)
+  the identical card gets on `dual-linux`. OCuLink was tried first and did not
+  work; a different BIOS setting may fix that later. Resizable BAR is enabled in
+  BIOS but does not survive the tunnel: HIP still reports `isLargeBar: 0`.
+  **This link is the single most consequential fact about the rig** — any layout
+  that streams weights across it during prefill is starved, see
+  [benchmarks.md](benchmarks.md).
+- **No CUDA Toolkit is installed.** `C:\Program Files\NVIDIA GPU Computing
+  Toolkit\CUDA\v13.2` and `v13.3` exist but contain only empty `bin`/`lib`
+  shells — leftovers of a runtime, with no `nvcc`. `setup-llama.ps1` therefore
+  fails at `Require-Command nvcc` for any backend containing CUDA, and the CUDA
+  backend has to come from an upstream prebuilt release instead.
+- **The upstream Windows ROCm build does not work here, and not for the obvious
+  reason.** `llama-b10441-bin-win-rocm-7.14-x64.zip` lists no devices at all,
+  yet its `ggml-hip.dll` *does* contain gfx1151 (the baked target list runs
+  gfx1010 → gfx1250). `hipInfo.exe` from the SDK enumerates the iGPU fine, so
+  HSA works; forcing the SDK's `amdhip64_7.dll` next to the exe changes nothing.
+  It is an ABI mismatch between that build's ROCm 7.14 and the installed HIP SDK
+  7.1. A local single-arch build of just `ggml-hip.dll` (69 MB against the
+  prebuilt's 881 MB) enumerates `ROCm0` immediately.
+- **ROCm's clang cannot link on its own.** Building the HIP backend outside a
+  Visual Studio developer environment dies with `lld-link: could not open
+  'msvcrtd.lib' / 'oldnames.lib'`. Import `vcvars64.bat -vcvars_ver=14.44`
+  first — the toolset that `setup-llama.ps1` already selects for CUDA.
+- **A HIP runtime that lists no devices is usually a `PATH` problem, not an ABI
+  one.** `ggml-hip.dll` resolves rocBLAS and its Tensile kernel library out of
+  the HIP SDK, which is not on the system `PATH`. Without it the runtime loads
+  and reports `CUDA0` only — the same silent symptom as the ABI mismatch above.
+  `start-llama-server.ps1` now prepends `$HIP_PATH\bin` for ROCm modes.
+- **`GGML_CUDA_NO_PINNED=1` must not be set at a large framebuffer.** It makes
+  the load fail or hang on the iGPU's single large allocation, because unpinned
+  host staging competes with the carve-out for the same physical RAM. Details
+  and the `-AllowPinned` switch in [benchmarks.md](benchmarks.md).
+- **Port 8080 is occupied** by a service called `AgentService`. Everything here
+  runs on 8090.
+
+### BIOS framebuffer: not a single "best" value
+
+The iGPU carve-out was measured at both extremes with the same model and
+layout, and **the right setting depends on which backend drives the iGPU**:
+
+| Framebuffer | Windows sees | `hipInfo` total | Vulkan0 total | Best for |
+|---|---|---|---|---|
+| 1 GB   | 126.6 GB RAM | 76.99 GB | 104773 MiB | Vulkan (`vulkan-cuda`) |
+| 64 GB  | 63.6 GB RAM  | 99.74 GB | 114326 MiB | HIP (`rocm-cuda`) |
+
+At 64 GB the iGPU's memory is a dedicated carve-out that is not fully
+CPU-visible (`isLargeBar: 0`), so host writes into it go through a small BAR
+window and a staging buffer. The Vulkan backend pays 45% of its prefill for
+that; the HIP backend does not pay it at all. At 1 GB the iGPU runs out of
+ordinary system RAM through GTT, which is fully CPU-visible and needs no
+staging. Numbers in [benchmarks.md](benchmarks.md).
+
+Note the second cost of a large framebuffer: at 64 GB the OS is left with
+63.6 GB, which is no longer enough for the CUDA-only profile's ~56 GB of
+RAM-hosted experts.
+
+The older guidance — 64 GB UMA conservative, 96 GB UMA broken — was written for
+ROCm running a model *entirely* on the iGPU, and still applies to that case.
+It does not describe a dual layout where the iGPU is fed from another device.
+Details in [rocm-bugs.md](rocm-bugs.md).
 
 ## `dual-linux` — Radeon AI PRO R9700 + RTX PRO 6000 (Linux)
 
