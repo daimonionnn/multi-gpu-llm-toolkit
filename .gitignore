@@ -21,6 +21,8 @@ hip-release-temp/
 
 # Logs
 *.log
+*.log.err
+logs/
 
 # Temp / OS files
 .DS_Store

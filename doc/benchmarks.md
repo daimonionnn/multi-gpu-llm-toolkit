@@ -1,5 +1,10 @@
 # Benchmarks
 
+For *why* these numbers come out the way they do — the mechanisms behind prefill
+and generation, and how to predict a configuration before measuring it — see
+[performance-model.md](performance-model.md). This file is the evidence; that
+one is the theory.
+
 Results are grouped by **rig**, because the two test machines are not
 comparable hardware — see [systems.md](systems.md). A number from `halo-win`
 says nothing about what `dual-linux` will do, and vice versa. Treat any
@@ -38,17 +43,373 @@ Tests the true end-to-end experience of a client interacting with `llama-server`
 
 ---
 
-## Results: `halo-win` (Strix Halo iGPU + RTX 5090, Windows)
+## Results: `halo-win` — DeepSeek V4 Flash MXFP4 (Strix Halo iGPU + RTX PRO 6000, Windows)
 
-Pending. To be measured across:
+Measured 2026-08-15, the day the RTX 5090 was replaced by an RTX PRO 6000. Same
+model, same quant and the same 96 GB card as the `dual-linux` section below, so
+the two are unusually comparable — except for the link: PCIe 5.0 x16 there,
+**four external lanes** here (~8 GB/s). That one difference decides the whole
+tuning, in both directions.
 
-1. `rocm-cuda`
-2. `vulkan-vulkan`
-3. `vulkan-cuda`
+The rig changed under measurement, which is why the tables carry a hardware
+column. The card started the day on a **Thunderbolt 5** tunnel; OCuLink was made
+to work later (it needs Resizable BAR *disabled* in BIOS), and the BIOS iGPU
+framebuffer was tried at 1 GB and 64 GB. Both end states — **OCuLink, 1 GB
+framebuffer** — are what the profile ships with.
 
-| Model | Quant | Backend | Context | Tensor split | UMA | GenTok/s | TotalTok/s |
-|-------|-------|---------|---------|--------------|-----|---------:|-----------:|
-| —     | —     | —       | —       | —            | —   | —        | —          |
+Setup: lmstudio-community `DeepSeek-V4-Flash-0731-MXFP4` (145.6 GB, 4 shards),
+43 layers, MLA attention. Everything below is `-c 131072 -ngl 99 -fa on
+-lm none --jinja` over HTTP, single request, 128 predicted tokens, using
+`benchmark-loaded-model.ps1`. Runtimes are upstream **prebuilt b10441** binaries
+rather than local builds — see [Assembling runtimes without a compiler](#assembling-runtimes-without-a-compiler).
+
+### Final configuration (OCuLink, 1 GB framebuffer)
+
+| Layout | pp 4k | pp 16k | pp 32k | tg 4k | tg 16k | tg 32k |
+|--------|------:|-------:|-------:|------:|-------:|-------:|
+| **`rocm-cuda`, 18 expert layers on iGPU** | **481.5** | **497.5** | **487.1** | **35.88** | **36.13** | **34.98** |
+| `vulkan-cuda`, 18 expert layers on iGPU | 338.8 | 352.1 | 351.6 | 35.14 | 34.35 | 34.94 |
+| CUDA-only, `--n-cpu-moe 18` | 266.4 | 299.1 | 296.1 | 23.29 | 22.93 | 22.93 |
+
+`rocm-cuda` wins on both axes — **+41% prefill and +5% generation** over the
+Vulkan dual, and +66% / +58% over CUDA-only. That is the profile default.
+
+### How it got there
+
+| # | Layout | Link | FB | pp 4k | pp 16k | pp 32k | tg 4k | tg 16k | tg 32k |
+|---|--------|---|---|------:|-------:|-------:|------:|-------:|-------:|
+| 1 | CUDA-only, `--n-cpu-moe 18` | TB5 | 1 GB | 245.5 | 260.7 | 262.3 | 22.95 | 22.70 | 22.43 |
+| 2 | `vulkan-cuda`, 20 expert layers | TB5 | 1 GB | 300.4 | 317.9 | 312.7 | 32.33 | 32.18 | 30.86 |
+| 3 | `vulkan-cuda`, 18 expert layers | TB5 | 1 GB | 328.9 | 342.6 | 340.1 | 33.16 | 33.86 | 33.46 |
+| 4 | as 3, CUDA 12.4 runtime instead of 13.3 | TB5 | 1 GB | 115.8* | 336.3 | 329.9 | 17.72* | 34.08 | 33.44 |
+| 5 | `vulkan-cuda`, 19 expert layers, `-b 8192 -ub 4096` | TB5 | 1 GB | 318.9 | 325.5 | 320.4 | 32.52 | 32.65 | 31.93 |
+| 6 | as 3 | TB5 | 64 GB | 184.2 | 188.0 | 186.4 | 29.81 | 31.09 | 29.49 |
+| 7 | `rocm-cuda`, 18 expert layers | TB5 | 64 GB | 452.4 | 468.1 | 458.7 | 32.84 | 32.60 | 31.99 |
+| 8 | as 7 | **OCuLink** | **1 GB** | 481.5 | 497.5 | 487.1 | 35.88 | 36.13 | 34.98 |
+| 9 | as 3 | **OCuLink** | **1 GB** | 338.8 | 352.1 | 351.6 | 35.14 | 34.35 | 34.94 |
+| 10 | as 1, unpinned | **OCuLink** | **1 GB** | 266.4 | 299.1 | 296.1 | 23.29 | 22.93 | 22.93 |
+| 11 | as 10 + `--no-op-offload` (experts computed on the CPU) | OCuLink | 1 GB | 99.4 | 100.1 | — | 23.85 | 23.68 | — |
+| 12 | repeat of 11, identical config | OCuLink | 1 GB | 98.4 | 99.8 | — | 23.64 | 23.44 | — |
+| 13 | as 10 with `-t 4 -tb 4` | OCuLink | 1 GB | 277.9 | 305.4 | — | 20.71 | 20.45 | — |
+
+\* row 4's 4k figures are the PTX JIT on the first request: the CUDA 12.4 build
+has no `sm_120` cubins. Its later rows are clean.
+
+`-b 4096 -ub 2048` everywhere except row 5. All dual rows use `-ts 0,1` plus
+`-ot 'blk\.(N-42)\.ffn_.*_exps.*=<device>'`, i.e. **only expert FFN tensors**
+move to the iGPU.
+
+### The link decides everything — and it is the width, not the tunnel
+
+Row 1 is the same configuration that measures **1175 pp / 16.4 tg** on
+`dual-linux`. Here it gives 262 pp / 22.4 tg — a quarter of the prefill and 40%
+more generation, from the same card and the same flags.
+
+Both halves follow from the hardware:
+
+- **Generation is faster** because the RAM-hosted experts stream from LPDDR5X
+  instead of DDR5. Generation on this model tracks expert-read bandwidth almost
+  exclusively, so the memory upgrade shows up almost undiluted.
+- **Prefill collapses** because `--op-offload` (on by default) ships batched
+  expert matmuls to the GPU, which means pushing the expert weights across the
+  link on every micro-batch. Eight times less bandwidth, four times less prefill.
+
+An earlier revision of this file blamed the Thunderbolt tunnel for that gap.
+**Rows 1 and 10 disprove it**: replacing TB5 with native OCuLink, same lane
+count, buys only +9–15% of prefill (262 → 299 at 16k), not a quarter of it back.
+Both links deliver ~8 GB/s; the tunnel adds latency and a little overhead, and
+that is all it costs. What starves prefill is **four lanes against sixteen**,
+and no cabling change fixes that. (One caveat on that pair: the TB5 run had
+pinned host memory and the OCuLink run did not — see the pinning trap below —
+so the link is worth slightly more than the 15%.)
+
+So the tuning that wins on `dual-linux` — keep experts in RAM, buy prefill back
+with a bigger `-ub` — is the wrong shape here. **Nothing may cross the link
+during prefill.**
+
+#### …but the CPU is not the alternative, AVX-512 or not
+
+The obvious reply to a starved link is to stop shipping weights and compute in
+place: this rig has 16 Zen 5 cores with AVX-512 and LPDDR5X, against the Arrow
+Lake in `dual-linux` that has neither. `--no-op-offload` does exactly that
+(rows 11 and 12), and it is **three times worse**:
+
+| CUDA-only, `-ncmoe 18`, 16 threads | pp 4k | pp 16k | tg 4k | tg 16k |
+|---|---:|---:|---:|---:|
+| `--op-offload` (default) | 266.4 | 299.1 | 23.29 | 22.93 |
+| `--no-op-offload`, run 1 | 99.4 | 100.1 | 23.85 | 23.68 |
+| `--no-op-offload`, run 2 | 98.4 | 99.8 | 23.64 | 23.44 |
+
+Copying 58 GiB of expert weights across four PCIe lanes and computing on the
+Blackwell beats computing in place on the CPU by 3x. Telemetry confirms the role
+reversal — during the `--no-op-offload` prefill the CPU sits at 72.9% while the
+GPU idles at 13.7% and 81 W. Generation is 3% *better* without op-offload, which
+fits: at batch 1 there is nothing to amortise, so the transfer is pure overhead.
+`dual-linux` measured the same sign there.
+
+(The two `--no-op-offload` rows were meant to be a 16 vs 32 thread comparison.
+They are not: `-t` was passed through `Start-Process -ArgumentList` and never
+reached `llama-server`, which logged `n_threads = 16` in both. They stand as a
+repeatability check — 1% — and the thread question is answered by row 13
+instead, launched directly.)
+
+#### Threads: nothing on prefill, 11% on generation
+
+Row 13 against row 10, `-t 4 -tb 4` against the default 16, verified in the log:
+
+| Threads | pp 4k | pp 16k | tg 4k | tg 16k |
+|---:|---:|---:|---:|---:|
+| 4 | 277.9 | 305.4 | 20.71 | 20.45 |
+| 16 | 266.4 | 299.1 | 23.29 | 22.93 |
+
+**Prefill is unchanged** (4 threads is even marginally ahead, within noise) —
+the same result `dual-linux` got, and for the same reason: with `--op-offload`
+the host threads have almost nothing to do during prefill. Generation gains
+**11%**, more than the 2–4.5% measured on `dual-linux`, but the same shape.
+
+This matters for one cross-rig claim that was overstated in an earlier revision
+of this file. `halo-win` generating at 22.9 against `dual-linux`'s 16.4-17.2 in
+the identical layout was attributed to LPDDR5X against DDR5. Two measurements
+later that is not supportable:
+
+- the `dual-linux` figure was taken at **4 threads** (its profiles never set
+  `-t`), and this rig at 4 threads gives 20.45, so part of the gap is thread
+  count, not memory;
+- `windows/scripts/membw.c`, a port of the Linux benchmark with identical buffer
+  size and repeat count, measures **83.8 GB/s at 16 threads here against 89.9
+  GB/s** on `dual-linux`. By that benchmark this rig's memory is *slower*.
+
+What survives is a ~22% generation advantage at equal threads whose cause is
+**not established**. Candidates: access latency rather than streaming bandwidth
+(expert reads are scattered, not sequential), AVX-512 helping the MXFP4 unpack
+at batch 1, or the different llama.cpp builds. Not worth guessing about in a
+file of measurements.
+
+The ranking that matters is therefore not about the link but about **which
+processor does the expert matmuls**: a second GPU that owns the memory (497 pp)
+beats shipping to the big GPU (299 pp) beats the CPU (100 pp).
+
+### The layout that follows: zero CPU offload
+
+The iGPU's memory *is* system RAM, so putting the overflow experts there costs
+no bus traffic at all. With 18 layers' experts on the iGPU and everything else
+on CUDA0, the 146 GB model becomes **fully GPU-resident** — ~89 GB on the
+NVIDIA card, ~61 GB on the iGPU, `--n-cpu-moe` unused — and gains 31% prefill
+and 41% generation over row 1. Load takes 65–85 s.
+
+The split is the strongest lever available, and it is bounded by CUDA0's VRAM:
+
+| Expert layers on iGPU | CUDA0 used | pp 32k | tg 32k |
+|---:|---:|---:|---:|
+| 20 | 88 973 MiB | 312.7 | 30.86 |
+| 18 | 95 490 MiB | 340.1 | 33.46 |
+| 17 | — | does not load at `-c 131072` | |
+
+Each layer moved back to the fast card is worth ~4.5% prefill and ~2%
+generation. 18 is the ceiling at 128k context.
+
+### `-ub` is not a lever here — the opposite of `dual-linux`
+
+Row 5 raises the micro-batch to 4096 and loses on both axes. On `dual-linux`
+`-ub 2048` was worth +55–60% of prefill, because a larger micro-batch amortises
+each transfer of an expert's weights over more tokens. Here **nothing is
+transferred** — every expert already sits in the memory of the device that
+computes it — so there is nothing to amortise, and the larger compute buffers
+cost an expert layer on CUDA0, which is a measurable loss. Spend spare VRAM on
+expert layers, not on batch size.
+
+### Only experts may leave the NVIDIA card
+
+A classic layer split (`-ts`, no `-ot`) fails outright. `-ts 19,24` dies with
+`CUDA error: out of memory` — the whole KV cache and the compute buffers land
+on CUDA0 regardless of the layer proportion. `-ts 22,21` loads and then exits
+during warmup, after logging:
+
+```
+resolve_fused_ops: layer 2 is assigned to device Vulkan0 but Lightning Indexer
+                   is assigned to device CPU (usually due to missing support)
+resolve_fused_ops: Lightning Indexer not supported, set to disabled
+resolve_fused_ops: fused DeepSeek V4 HC pre / HC comb / HC post not supported,
+                   set to disabled
+```
+
+Whole layers on the iGPU bring attention with them, and the Vulkan backend
+implements none of DeepSeek V4's four fused ops, so llama.cpp disables all of
+them globally. **None of those warnings appear in the `-ot` layout**, where
+attention stays on CUDA0 and only `ffn_*_exps` tensors move. Keep it that way.
+
+### No Blackwell FA collapse on this model
+
+Rows 3 and 4 are the same layout on CUDA 13.3 and CUDA 12.4. They agree within
+noise, and generation is flat from 4k to 32k in both. Neither the 8192 cliff nor
+the toolkit dependency documented in [cuda-fa-blackwell.md](cuda-fa-blackwell.md)
+appears here — consistent with that bug living in the `fattn` vector/MMA
+heuristic for GQA models, which DeepSeek's MLA path does not use.
+
+Practical consequence: **this model needs no CUDA 12.x build and no patch.**
+Use the 13.3 prebuilt, which has native `sm_120` cubins and does not pay JIT on
+the first request. Nothing here says anything about Qwen or Hermes on this rig;
+those have to be measured separately.
+
+### Framebuffer: backend-dependent, not universally better
+
+Row 6 is row 3 with the BIOS iGPU carve-out raised from 1 GB to 64 GB. It costs
+**45% of prefill and 8% of generation**, reproduced across two runs
+(184.2/195.0 and 188.0/190.8 pp). Placement was verified correct — 58.4 GB
+dedicated + 1.4 GB shared on the iGPU, and llama-server's working set fell from
+66 GB to 2.4 GB, so the experts really did move into the carve-out.
+
+Utilisation during the run says what changed:
+
+| Framebuffer | NVIDIA util | NVIDIA power | iGPU util |
+|---|---:|---:|---:|
+| 1 GB | 33.4% | 164 W | 48.2% |
+| 64 GB | 28.1% | 127 W | 33.5% |
+
+Both devices do *less* work per unit time — they are waiting on copies, not
+computing. The mechanism is `isLargeBar: 0`: the dedicated carve-out is not
+fully CPU-visible, so host writes into it go through a small BAR window and a
+staging buffer, while GTT-backed shared memory at 1 GB needs no staging at all.
+Prefill takes five times the damage generation does, which fits — prefill moves
+2048-token activation tensors across the boundary, generation moves one vector
+per token. Resizable BAR does not help: HIP reports `isLargeBar: 0` with ReBAR
+on over the tunnel, and OCuLink only enumerates with ReBAR off.
+
+**But this is a Vulkan property, not a hardware one.** Row 7 runs the identical
+layout on HIP at the same 64 GB framebuffer and shows no penalty at all. That
+made the carve-out look mandatory for HIP — and row 8 shows it is not: HIP is
+*faster* at 1 GB, allocating its 57.4 GiB out of GTT without complaint. So
+nothing wants the carve-out, and **1 GB is the right setting for every layout
+here**. Whatever staging path the Vulkan backend takes into dedicated VRAM, HIP
+does not take it, and neither needs the dedicated memory to begin with.
+
+### `rocm-cuda` wins on both axes
+
+Best of each backend on the final hardware (rows 8, 9, 10):
+
+| Layout | pp 16k | tg 16k |
+|---|---:|---:|
+| **`rocm-cuda`** | **497.5** | **36.13** |
+| `vulkan-cuda` | 352.1 | 34.35 |
+| CUDA-only | 299.1 | 22.93 |
+
+**+41% prefill and +5% generation** over the Vulkan dual. Over TB5 at a 64 GB
+framebuffer the same layout gave 468.1 pp / 32.60 tg, so the move to OCuLink
+plus a small framebuffer is worth +6% / +11% (two variables, both favourable).
+Depth costs it little: at a 65 380-token prompt it measured 441.8 pp / 31.11 tg
+on the TB5 configuration.
+
+Reproducibility on the TB5/64 GB configuration: three independent loads gave
+468.1 / 465.7 / 460.1 pp and 32.60 / 32.17 / 32.45 tg at 16k, the last one
+launched through `start-deepseek-mxfp4-nvidia-amd.ps1` rather than by hand.
+
+#### Trap: pinned host memory has to be decided per layout
+
+`start-llama-server.ps1` has always set `GGML_CUDA_NO_PINNED=1` for the `rocm`,
+`cuda` and `rocm-cuda` modes. **Each setting of that variable breaks one of the
+two layouts**, and both failures are loading failures, not slowdowns.
+
+*Dual layouts need pinning ON.* With a 64 GB carve-out, `GGML_CUDA_NO_PINNED=1`
+prevents the model from loading at all. Two runs, two symptoms, both stopping at
+exactly 89 846 MiB of CUDA VRAM — the point where the single large iGPU buffer
+is allocated:
+
+```
+ggml_backend_cuda_buffer_type_alloc_buffer: allocating 58752.00 MiB on device 0:
+    cudaMalloc failed: out of memory
+alloc_tensor_range: failed to allocate ROCm0 buffer of size 61605937152
+```
+
+and, in the other run, a hard hang at the same point: VRAM frozen, no CPU time
+accumulating, no disk I/O. Without the variable the identical command loads in
+60–70 s, reproduced three times. The mechanism is UMA plus a large carve-out:
+unpinned loading keeps its staging in pageable host memory, and here host memory
+and the carve-out are the *same physical RAM* — with 64 GB carved out the OS has
+63.6 GB left, and a 57.4 GiB device allocation collides with the staging.
+
+*CUDA-only needs pinning OFF.* Its RAM-hosted experts are one ~58.4 GiB host
+buffer, and pinning that much simply fails:
+
+```
+alloc_tensor_range: failed to allocate CUDA_Host buffer of size 62664998912
+```
+
+with **112.7 GB of RAM free** — it is the size of the single pinned allocation
+that fails, not a shortage of memory. The same layout loaded pinned earlier in
+the day, so it sits right at the edge and depends on fragmentation. Unpinned it
+loads every time, at the cost of slower host-to-device transfer, which is why
+row 10 is the number to expect from this layout rather than row 1.
+
+`start-llama-server.ps1` therefore takes `-AllowPinned`, which suppresses the
+variable. The default is unchanged, so existing profiles behave as before; the
+DeepSeek profile passes it for the dual layouts and withholds it for CUDA-only.
+
+### Stability: the `deepseek4` HIP fault has not appeared here
+
+Two consecutive 65 380-token prefills with a full cache clear between them,
+on the `rocm-cuda` layout:
+
+| Probe | pp | tg |
+|---|---:|---:|
+| 65k #1 | 441.8 | 31.11 |
+| 65k #2 (after clear) | 440.8 | 31.09 |
+
+Roughly **184 000 prefill tokens through the AMD expert path, zero
+`HSA_STATUS_ERROR_MEMORY_FAULT`**, with throughput identical to the decimal.
+
+This certifies nothing, and the reason is recorded further down this file: on
+`dual-linux` a 165k-token gauntlet passed and the same layout died at ~45k
+tokens in production hours later. What is genuinely different here is the
+hardware — gfx1151 on Windows against gfx1201 on Linux — so the `deepseek4`
+HIP bug may simply not apply. Only sustained real use will tell.
+
+### Assembling runtimes without a compiler
+
+No CUDA Toolkit is installed on this rig ([systems.md](systems.md)), so
+`setup-llama.ps1` cannot build anything containing CUDA. It was not needed.
+Every backend DLL in upstream's b10441 Windows releases is built with
+`GGML_BACKEND_DL`, so backends from *the same build* can be mixed by copying
+DLLs into one directory — the Windows analogue of what
+`linux/scripts/build-cuda12-container.sh` does with a container:
+
+| Runtime | Assembled from | Devices |
+|---|---|---|
+| `runtime-cuda133` / `runtime-cuda124` | release zip + matching cudart zip | CUDA0 |
+| `runtime-vulkan` | `win-vulkan` zip | Vulkan0 (AMD), Vulkan1 (NVIDIA) |
+| `runtime-vulkan-cuda133` | CUDA runtime + `ggml-vulkan.dll` | CUDA0, Vulkan0, Vulkan1 |
+| `runtime-rocm-cuda133` | CUDA runtime + locally built `ggml-hip.dll` | CUDA0, ROCm0 |
+
+Only the HIP backend had to be compiled, because the upstream ROCm build is ABI
+incompatible with the installed SDK (details in [systems.md](systems.md)).
+Building just that one DLL, single-arch, takes minutes:
+
+```powershell
+# from a shell where vcvars64.bat -vcvars_ver=14.44 has been imported
+cmake -S . -B build-hip -G Ninja -DCMAKE_BUILD_TYPE=Release `
+    -DCMAKE_C_COMPILER="$env:HIP_PATH/bin/clang.exe" `
+    -DCMAKE_CXX_COMPILER="$env:HIP_PATH/bin/clang++.exe" `
+    -DGGML_HIP=ON -DGGML_CUDA=OFF -DGGML_VULKAN=OFF `
+    -DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF `
+    -DAMDGPU_TARGETS=gfx1151 -DGPU_TARGETS=gfx1151
+cmake --build build-hip --target ggml-hip -j 14
+```
+
+Check out the **same tag** as the prebuilt (`b10441` here) before building, or
+the ABI will not match.
+
+### Not yet measured on this rig
+
+- Anything other than DeepSeek V4 Flash. The Blackwell FA finding above is
+  model-specific and Qwen/Hermes may well hit the collapse.
+- `vulkan-vulkan`, and the `Lucebox/DeepSeek-V4-Flash-ROCMFP2-STRIX` quant
+  (95.3 GB) that would nearly fit the NVIDIA card alone.
+- Long-run stability of the AMD expert path under real traffic. The soak above
+  ran on the TB5 configuration; nothing has been soaked on OCuLink yet.
+- Whether the expert split still tops out at 18 layers on OCuLink — the ceiling
+  is CUDA0's VRAM, which did not change, so it should, but 17 was never retried.
+- A wider link. Four lanes is the binding constraint on prefill for any layout
+  that moves weights; a gen4 or gen5 x16 slot would be the one upgrade that
+  changes the shape of these results.
 
 ## Results: `dual-linux` (Radeon AI PRO R9700 + RTX PRO 6000, Linux)
 

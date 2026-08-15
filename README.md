@@ -47,7 +47,7 @@ Windows-vs-Linux comparison**. Results are keyed by rig, never by OS.
 
 | Rig                        | OS      | CPU / platform               | GPU 1                                    | GPU 2                                 | Memory model                   |
 |----------------------------|---------|------------------------------|------------------------------------------|---------------------------------------|--------------------------------|
-| **halo-win**               | Windows | AMD Ryzen AI MAX+ 395        | AMD Radeon 8060S iGPU (gfx1151, UMA)     | NVIDIA RTX 5090 (32 GB)               | 128 GB unified, BIOS UMA split |
+| **halo-win**               | Windows | AMD Ryzen AI MAX+ 395        | AMD Radeon 8060S iGPU (gfx1151, UMA)     | NVIDIA RTX PRO 6000 (96 GB, **external, PCIe 4.0 x4**) | 128 GB unified, BIOS UMA split |
 | **dual-linux**             | Linux   | Intel Core Ultra 7 270K Plus | AMD Radeon AI PRO R9700 (gfx1201, 32 GB) | NVIDIA RTX PRO 6000 Blackwell (96 GB) | Discrete VRAM, no UMA          |
 | **halo-linux** *(planned)* | Linux   | AMD Ryzen AI MAX+ 395        | same hardware as halo-win                | same hardware as halo-win             | 128 GB unified, BIOS UMA split |
 
@@ -76,6 +76,7 @@ can coexist and you switch between them at launch time rather than rebuilding.
 
 These apply across platforms and are the reason both live in one repo:
 
+- **[doc/performance-model.md](doc/performance-model.md)** — what actually limits prefill and generation: the mechanisms, the arithmetic to predict a rig before buying it, what every flag does, and what each hardware change was measured to be worth
 - **[doc/systems.md](doc/systems.md)** — the test rigs, in detail
 - **[doc/benchmarks.md](doc/benchmarks.md)** — results, keyed by rig and backend, plus what the metrics actually mean
 - **[doc/rocm-bugs.md](doc/rocm-bugs.md)** — ROCm/HIP memory bugs, with a per-bug matrix of which hardware and OS each one affects
@@ -87,9 +88,12 @@ These apply across platforms and are the reason both live in one repo:
 ```
 .
 ├── doc/                  # shared, cross-platform
-│   ├── systems.md
-│   ├── benchmarks.md
-│   └── rocm-bugs.md
+│   ├── performance-model.md   # what limits prefill and generation, and why
+│   ├── systems.md             # the rigs
+│   ├── benchmarks.md          # results, keyed by rig
+│   ├── rocm-bugs.md
+│   ├── cuda-fa-blackwell.md
+│   └── cuda-glibc-243.md
 ├── windows/              # PowerShell implementation  (rig: halo-win)
 │   ├── scripts/
 │   └── patch-system-dll.ps1
@@ -101,6 +105,12 @@ These apply across platforms and are the reason both live in one repo:
 
 - [x] Windows: `rocm-cuda`, `vulkan`, `vulkan-vulkan`, `vulkan-cuda` building and serving
 - [x] Windows: `isLargeBar` binary patch for >64 GB UMA
+- [x] Windows: RTX 5090 replaced by RTX PRO 6000 96 GB, external on four lanes (2026-08-15)
+- [x] Windows: DeepSeek V4 Flash MXFP4 (146 GB) served **fully GPU-resident** — experts of 18 layers on the iGPU, no CPU offload; 497 pp / 36.1 tg on `rocm-cuda`
+- [x] Windows: runtimes assembled from upstream prebuilt backend DLLs, no CUDA Toolkit needed
+- [x] Windows: BIOS framebuffer settled — smallest is best for every dual layout, including HIP
+- [ ] Windows: measure anything other than DeepSeek on the new card
+- [ ] Windows: soak the AMD expert path on the OCuLink configuration
 - [x] Linux: build and launch scripts ported to bash, detection and error paths verified on the rig
 - [x] Linux: confirmed ROCm supports the R9700 natively as `gfx1201` — no `HSA_OVERRIDE_GFX_VERSION` needed
 - [x] Linux: confirmed the APU/UMA bugs cannot occur on discrete cards (matrix in `doc/rocm-bugs.md`)

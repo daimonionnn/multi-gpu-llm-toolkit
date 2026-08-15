@@ -15,6 +15,16 @@ param(
 
     [int]$Port         = 8080,
     [string]$RuntimeDir,
+
+    # Keep pinned host memory enabled for the CUDA/HIP backends. Off by
+    # default, i.e. GGML_CUDA_NO_PINNED=1, which is what this project has always
+    # set for those backends. Pass this when a model does not fit comfortably in
+    # what the OS is left with after the BIOS UMA carve-out: without pinned
+    # buffers the loader's host staging competes with the carve-out for the same
+    # physical memory, and a large single ROCm allocation then fails or hangs.
+    # See doc/benchmarks.md, halo-win / DeepSeek V4 Flash.
+    [switch]$AllowPinned,
+
     [string[]]$ExtraArgs = @()
 )
 
@@ -52,8 +62,25 @@ if (-not (Test-Path $serverExe)) {
 $env:PATH = "$RuntimeDir;" + $env:PATH
 
 if ($Mode -in @("rocm", "cuda", "rocm-cuda")) {
-    $env:GGML_CUDA_NO_PINNED = "1"
+    if ($AllowPinned) {
+        Remove-Item Env:GGML_CUDA_NO_PINNED -ErrorAction SilentlyContinue
+    } else {
+        $env:GGML_CUDA_NO_PINNED = "1"
+    }
     Remove-Item Env:GGML_CUDA_ENABLE_UNIFIED_MEMORY -ErrorAction SilentlyContinue
+}
+
+# ggml-hip.dll resolves rocblas/hipblas and the Tensile kernel library out of
+# the HIP SDK, which is not on the system PATH. Without this the runtime loads
+# but enumerates no ROCm device at all — the same silent symptom as an ABI
+# mismatch, so it is easy to misdiagnose.
+if ($Mode -in @("rocm", "rocm-cuda")) {
+    $hipRoot = $env:HIP_PATH
+    if (-not $hipRoot) { $hipRoot = [System.Environment]::GetEnvironmentVariable("HIP_PATH", "Machine") }
+    $hipBin = if ($hipRoot) { Join-Path $hipRoot "bin" } else { $null }
+    if ($hipBin -and (Test-Path $hipBin)) {
+        $env:PATH = "$hipBin;" + $env:PATH
+    }
 }
 
 # Clean up any leftover Vulkan driver filter

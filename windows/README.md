@@ -1,11 +1,11 @@
-# Llama Server on Windows (RTX 5090 + AMD Strix Halo iGPU)
+# Llama Server on Windows (RTX PRO 6000 + AMD Strix Halo iGPU)
 
 > Part of [multi-gpu-llm-toolkit](../README.md). This is the **Windows** implementation,
 > developed on the **`halo-win`** rig. For Linux, see [../linux/](../linux/).
 
 > **Note:** This project was primarily developed and optimized for an **AMD Strix Halo 395+ with 128GB RAM** paired with one dedicated GPU card, but it can be easily modified or adapted to run on any Windows machine with 2 or more GPUs.
 
-Dual-backend llama.cpp server using **CUDA** (NVIDIA RTX 5090) and **ROCm/HIP** (AMD Radeon 8060S iGPU) simultaneously, with Open WebUI as a web frontend. Also supports **Vulkan** as an alternative backend that can drive both GPUs without ROCm/HIP.
+Dual-backend llama.cpp server using **CUDA** (NVIDIA RTX PRO 6000) and **ROCm/HIP** (AMD Radeon 8060S iGPU) simultaneously, with Open WebUI as a web frontend. Also supports **Vulkan** as an alternative backend that can drive both GPUs without ROCm/HIP.
 
 All paths below are relative to this `windows/` directory — run the scripts from here.
 
@@ -19,10 +19,19 @@ All paths below are relative to this `windows/` directory — run the scripts fr
 
 | Component | Details |
 |-----------|-----|
-| CPU       | AMD Ryzen AI MAX+ 395 (32 threads) |
-| RAM       | 128 GB unified (64 GB GPU + 64 GB OS) |
-| GPU 1     | AMD Radeon 8060S iGPU (RDNA 3.5, gfx1151, 64 GiB VRAM via BIOS UMA, 512-bit bus) |
-| GPU 2     | NVIDIA GeForce RTX 5090 (32 GB VRAM, compute 12.0, PCIe 4.0 x4) |
+| CPU       | AMD Ryzen AI MAX+ 395 (16 cores / 32 threads) |
+| RAM       | 128 GB unified (BIOS UMA split between GPU and OS) |
+| GPU 1     | AMD Radeon 8060S iGPU (RDNA 3.5, gfx1151, VRAM via BIOS UMA, 512-bit bus) |
+| GPU 2     | NVIDIA RTX PRO 6000 Blackwell (96 GB VRAM, compute 12.0, **external over OCuLink, PCIe 4.0 x4**) |
+
+> **Changed 2026-08-15:** the discrete card was RTX 5090 32 GB until this date.
+> Results recorded before it were measured on the 5090. The current card is
+> external and only **four lanes wide** (~8 GB/s) — that link, not the GPU, is
+> what limits any layout that moves weights during prefill. It ran on a
+> Thunderbolt 5 tunnel first; OCuLink needs **Resizable BAR disabled** in BIOS
+> to enumerate at all, and is worth ~10% of prefill over the tunnel, not the
+> factor the lane count costs. Note `nvidia-smi` reports `gen1` at idle — sample
+> the link during a prefill, where it reads `gen4 x4`.
 
 Full specs and driver versions for both project rigs: [../doc/systems.md](../doc/systems.md).
 
@@ -43,22 +52,68 @@ Full specs and driver versions for both project rigs: [../doc/systems.md](../doc
 
 
 
+## Runtimes without a compiler (prebuilt mixing)
+
+Building is not the only way to get a runtime, and on the current rig it is not
+even possible for CUDA — no CUDA Toolkit is installed, only driver leftovers,
+so `setup-llama.ps1` stops at `Require-Command nvcc`.
+
+Upstream's Windows release zips are built with `GGML_BACKEND_DL`, so backend
+DLLs **from the same build number** can be mixed by copying them into one
+directory. `llama-server.exe` then loads every `ggml-*.dll` it finds next to
+itself and enumerates all of them:
+
+```powershell
+# release + matching cudart, extracted into windows\runtime-cuda133\
+# then one file makes it dual-vendor:
+Copy-Item .\runtime-vulkan\ggml-vulkan.dll .\runtime-vulkan-cuda133\
+.\runtime-vulkan-cuda133\llama-server.exe --list-devices
+#   CUDA0: NVIDIA RTX PRO 6000 Blackwell ...
+#   Vulkan0: AMD Radeon(TM) 8060S Graphics ...
+#   Vulkan1: NVIDIA RTX PRO 6000 Blackwell ...
+```
+
+Point any script at such a directory with `-RuntimeDir`.
+
+**The upstream ROCm zip is the exception** — `llama-b*-bin-win-rocm-*.zip`
+lists no devices on this machine even though its `ggml-hip.dll` does contain
+gfx1151; it is ABI incompatible with the installed HIP SDK 7.1. Compile that one
+DLL locally (single arch, a few minutes, needs `vcvars64.bat` imported first —
+ROCm's clang cannot find `msvcrtd.lib` on its own) and drop it beside the
+prebuilt CUDA runtime. Recipe in
+[../doc/benchmarks.md](../doc/benchmarks.md#assembling-runtimes-without-a-compiler).
+
 ## Recommended Modes on Windows (AMD Strix Halo + Dedicated GPU)
 
-For a dual-GPU system based on an AMD Strix Halo (e.g., AMD Strix Halo 395) combined with an NVIDIA dedicated GPU (e.g., RTX 5090 32GB), base your backend Mode and BIOS settings on the total memory footprint of the model and context:
+Base the backend mode and the BIOS setting on **where the model's weights end up**,
+not on the model's size alone. On a Strix Halo paired with a large dedicated GPU,
+there are three cases, and only the first is really a choice:
 
-As of 2026-05-29, this machine has also successfully loaded and served requests with **`rocm-cuda` at 96 GB UMA** using the patched HIP runtime and current CUDA/ROCm stack. Treat that as a verified observation for this setup, not a universal guarantee. **64 GB UMA** remains the conservative recommendation for ROCm on Windows until more benchmark and stability data is collected.
+* **Model + context fits the dedicated GPU.**
+  Use **`cuda`**. Adding the iGPU costs up to 3x — measured on `dual-linux` with
+  gpt-oss-120b, and the same shape applies here. BIOS framebuffer: minimum.
 
-**Example for AMD Strix Halo + RTX 5090 32GB**
+* **Model spills, and the spill fits in system RAM.**
+  Use **`rocm-cuda`** (or **`vulkan-cuda`** if you have no local HIP build) with
+  `-ot` to put **only the expert FFN tensors** of the overflow layers on the
+  iGPU, and no `--n-cpu-moe` at all. This is the layout that measures
+  497 pp / 36.1 tg on DeepSeek V4 Flash MXFP4, against 299 / 22.9 for the
+  CPU-offload alternative. BIOS framebuffer: **minimum** — see the box below.
 
-* **Model + Context < 126-128GB**
-  If the model and its context can comfortably fit within ~128GB (94GB AMD + 32GB NVIDIA), choose the **`rocm-cuda`** mode for the best performance.
-  * **BIOS Setting:** Set UMA GPU size to **64GB**.
+* **No second GPU available, or the AMD path is unstable for your model.**
+  Use **`cuda`** with `--n-cpu-moe N`, and tune `-ub` upward until it OOMs at
+  your target context. Needs the spill to fit in the RAM the OS is left with.
 
+Mode-by-mode reasoning, and the numbers behind these recommendations, are in
+[../doc/performance-model.md](../doc/performance-model.md).
 
-* **Model + Context > 126-128GB (Up to 160GB)**
-    If you are running exceptionally large models or huge context windows that exceed 96GB (on AMD Strix Halo), **`vulkan-cuda`** or **`vulkan-vulkan`** are still the safer choices. Historically, ROCm on Windows topped out near ~64GB contiguous UMA allocation and also showed poor 96 GB UMA behavior on this hardware. Current testing shows that **`rocm-cuda` can now start and serve requests at 96 GB UMA on this machine**, but that path should still be benchmarked and monitored for long-run stability before treating it as the default recommendation. Vulkan still circumvents the older ROCm limitations more reliably.
-  * **BIOS Setting:** Set UMA GPU size to **96GB**.
+The older guidance in this section — pick the UMA split by total footprint, 64 GB
+for models under ~128 GB, 96 GB above — was written when the dedicated card had
+32 GB and the iGPU had to hold most of the model. With a 96 GB card the iGPU is
+a helper rather than the main store, and the framebuffer advice inverts:
+**smallest wins for every dual layout measured**, because a large carve-out is
+not fully CPU-visible and everything written into it gets staged. Numbers in
+[Known ROCm bugs (summary)](#known-rocm-bugs-summary) below.
 
 
 
@@ -69,6 +124,12 @@ Each backend has its own runtime directory containing `llama-server.exe` and bac
 **ROCm+CUDA** (`runtime-rocm-cuda/`): `ggml-hip.dll` + `ggml-cuda.dll` — devices: `ROCm0`, `CUDA0`
 **Vulkan** (`runtime-vulkan/`): `ggml-vulkan.dll` — devices: `Vulkan0`, `Vulkan1`
 **Vulkan+CUDA** (`runtime-vulkan-cuda/`): `ggml-vulkan.dll` + `ggml-cuda.dll` — devices: `Vulkan0`, `CUDA0`
+
+The name is a convention, not a requirement — `start-llama-server.ps1` takes
+`-RuntimeDir`, so hand-assembled directories work the same way. The current rig
+runs out of `runtime-rocm-cuda133/` (upstream prebuilt CUDA 13.3 plus a locally
+built `ggml-hip.dll`) and `runtime-vulkan-cuda133/`, neither of which came from
+`setup-llama.ps1` — see [Runtimes without a compiler](#runtimes-without-a-compiler-prebuilt-mixing).
 
 ### Modes
 
@@ -102,9 +163,34 @@ There are **two independent bugs** affecting HIP memory on Strix Halo. Full deta
 
 **Recommended BIOS setting**: 64 GB UMA (64 GB GPU + 64 GB OS). At this setting Bug 1 is irrelevant and Bug 2 doesn't trigger. Setting 96 GB UMA is broken — see [../doc/rocm-bugs.md](../doc/rocm-bugs.md) for details.
 
+> **For a dual layout, use the smallest framebuffer, not the largest.** The
+> recommendation above describes ROCm running a model *entirely* on the iGPU.
+> When the iGPU only holds expert weights and is fed activations by the other
+> card, measurements on this rig (2026-08-15, DeepSeek V4 Flash MXFP4, pp/tg at
+> 16k) go the other way for both backends:
+>
+> | Backend | 1 GB framebuffer | 64 GB framebuffer |
+> |---|---:|---:|
+> | `rocm-cuda` | **497.5 pp / 36.13 tg** | 468.1 pp / 32.60 tg |
+> | `vulkan-cuda` | **352.1 pp / 34.35 tg** | 188.0 pp / 31.09 tg |
+>
+> A large carve-out is not fully CPU-visible (`isLargeBar: 0`), so host writes
+> into it go through a small BAR window and a staging buffer. Vulkan pays 45% of
+> its prefill for that; HIP does not, but is still faster without the carve-out.
+> A 64 GB carve-out also leaves the OS 63.6 GB, which is no longer enough for a
+> CUDA-only profile with ~56 GB of RAM-hosted experts. Full analysis:
+> [../doc/benchmarks.md](../doc/benchmarks.md).
+
 **Do NOT set** `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1` — `hipMallocManaged` is broken on Strix Halo (gfx1151). See [../doc/rocm-bugs.md](../doc/rocm-bugs.md#known-issue-hipmallocmanaged-is-broken-on-strix-halo).
 
 ## Prerequisites
+
+> These are the prerequisites for **building** backends with `setup-llama.ps1`.
+> If you assemble runtimes from upstream release zips instead
+> ([above](#runtimes-without-a-compiler-prebuilt-mixing)), you need none of them —
+> the current rig has no CUDA Toolkit installed at all and still runs `cuda`,
+> `vulkan-cuda` and `rocm-cuda`. Only `ggml-hip.dll` had to be compiled, and that
+> needs just the HIP SDK plus an MSVC toolset.
 
 **Common** (all backends):
 - Visual Studio 2022 Build Tools with `Desktop development with C++`
@@ -206,6 +292,9 @@ There are **two independent bugs** affecting HIP memory on Strix Halo. Full deta
 Profile scripts define model-specific llama-server arguments and accept `-Mode` to switch GPU backends:
 
 ```powershell
+.\scripts\start-deepseek-mxfp4-nvidia-amd.ps1                   # dual, experts on the iGPU
+.\scripts\start-deepseek-mxfp4-nvidia-amd.ps1 -CudaOnly         # fallback, experts in system RAM
+
 .\scripts\start-minimax-2.5-mxfp4.ps1                          # vulkan-vulkan (default)
 .\scripts\start-minimax-2.5-mxfp4.ps1 -Mode rocm-cuda          # ROCm+CUDA
 
