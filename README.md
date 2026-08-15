@@ -88,9 +88,12 @@ These apply across platforms and are the reason both live in one repo:
 ```
 .
 ├── doc/                  # shared, cross-platform
-│   ├── systems.md
-│   ├── benchmarks.md
-│   └── rocm-bugs.md
+│   ├── performance-model.md   # what limits prefill and generation, and why
+│   ├── systems.md             # the rigs
+│   ├── benchmarks.md          # results, keyed by rig
+│   ├── rocm-bugs.md
+│   ├── cuda-fa-blackwell.md
+│   └── cuda-glibc-243.md
 ├── windows/              # PowerShell implementation  (rig: halo-win)
 │   ├── scripts/
 │   └── patch-system-dll.ps1

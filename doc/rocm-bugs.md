@@ -274,6 +274,16 @@ Scenario 2 is currently broken (see above), but several workarounds may help. Us
 
 ## Shared memory ceiling (AMD iGPU + NVIDIA dGPU)
 
+> **Dated 2026-08-15:** the arithmetic in this section was worked out when
+> `halo-win`'s discrete card was an RTX 5090 with 32 GB, which made the iGPU the
+> larger of the two memory pools. That card is now an RTX PRO 6000 with 96 GB
+> ([systems.md](systems.md)), so the totals below no longer describe the rig —
+> and the practical conclusion inverts: with a 96 GB card the iGPU holds the
+> overflow rather than the model, and the smallest framebuffer measures fastest
+> ([benchmarks.md](benchmarks.md)). The *mechanism* described here — iGPU VRAM
+> and NVIDIA PCIe mappings competing for the same physical RAM — is unchanged
+> and still applies.
+
 With Scenario 1 (**64 GB UMA**), the AMD iGPU has 64 GiB of dedicated VRAM carved from system RAM. The NVIDIA RTX 5090 has its own 32 GB dedicated VRAM.
 
 **Total GPU memory: 64 GiB (AMD) + 32 GiB (NVIDIA) = 96 GiB** (Scenario 1)
