@@ -449,6 +449,38 @@ result:
 5. **CPU model, core count, AVX-512** — last, and much further down than it
    feels like it should be.
 
+## The cheapest prefill is the one that does not happen
+
+Everything above treats prefill as work to be made faster. The larger win is
+usually to avoid it. llama.cpp's server keeps each slot's KV cache and reuses
+the longest common **prefix** of the next request, which on `halo-win` measures:
+
+| Request against a 24 000-token prompt | Processed | Time |
+|---|---:|---:|
+| Cold | 24 003 | 52.6 s |
+| Same prompt, 1 400 tokens appended | 1 404 | **3.5 s** |
+| Same prompt, first 10 tokens changed | 25 415 | 55.8 s |
+
+The asymmetry is the whole point: **appended content is nearly free, changed
+prefixes cost everything.** Two consequences worth designing around:
+
+- Put stable material first — system prompt, tool definitions, retrieved
+  documents — and let only the tail vary. An agent that rewrites its system
+  prompt each turn pays full prefill every turn; the same content appended costs
+  a fifteenth of that.
+- Keep the number of live conversations at or below the slot count
+  (`--parallel`, 4 by default). Returning to a conversation still held in a slot
+  cost 0.11 s in the same test.
+
+`--cache-reuse`, which reuses cache across a divergence via KV shifting, sounds
+like it should rescue the third row. On this model it did not: tested at 256
+against both a prepended prefix and a 400-token insertion mid-document, it
+reused nothing. Measure it on your own model rather than assuming either way.
+
+The same reasoning applies to `-c`. A larger context window is not free even
+when unused: its KV cache is preallocated, and on a spilling model that VRAM is
+expert layers you no longer fit.
+
 ## Traps that look like hardware limits
 
 Four failures in this project produced numbers or crashes that no amount of
