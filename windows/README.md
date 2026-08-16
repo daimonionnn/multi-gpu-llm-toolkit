@@ -314,6 +314,43 @@ $env:LLM_MODELS_DIR = "D:\models"
 .\scripts\start-qwen122b-q6k.ps1
 ```
 
+### Stop everything and free the VRAM
+
+```powershell
+.\scripts\stop-llama.ps1            # stop this project's servers, wait for the VRAM
+.\scripts\stop-llama.ps1 -Status    # report only, change nothing
+.\scripts\stop-llama.ps1 -All       # also ask LM Studio to unload (opt-in)
+```
+
+Run this before launching a different profile. A resident server makes the next
+launch fail in three different-looking ways — an OOM, a "no CUDA device
+detected" during teardown, or a port that will not bind — which are all the same
+situation.
+
+It stops **only processes running from this checkout**, matched by executable
+path rather than by name, so an `llama-server.exe` belonging to LM Studio or any
+other llama.cpp-based host is reported and left running:
+
+```
+  ours:  llama-server.exe (pid 15424)  ...\windows\runtime-cuda133\llama-server.exe
+  other: llama-server.exe (pid 26516) — left alone  ...\.lmstudio\...
+```
+
+Ports are reported, never freed by force — killing a stranger's process to take
+a port is not this script's job. `taskkill` first, `Stop-Process -Force` only
+after 20 s, then it waits for the NVIDIA card to actually drop below 4 GB,
+because a 146 GB model does not release instantly.
+
+### Measure RAM bandwidth
+
+```powershell
+.\scripts\run-membw.ps1                  # 16 threads, comparable with the Linux rig
+.\scripts\run-membw.ps1 -Threads 32      # closer to this machine's ceiling
+```
+
+Prices CPU expert offload — see [../doc/performance-model.md](../doc/performance-model.md).
+Stop the server first; the benchmark needs the memory bus to itself.
+
 ### Diagnose HIP memory
 
 Run after changing BIOS UMA allocation to verify HIP reports correct memory and allocations work:
