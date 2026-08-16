@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$BaseUrl = "http://127.0.0.1:8080",
     [int[]]$Contexts = @(1024, 4096, 16384),
     [int]$PredictTokens = 256,

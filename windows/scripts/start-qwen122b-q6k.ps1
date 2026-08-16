@@ -1,4 +1,4 @@
-# Qwen3.5-122B-A10B Q6_K (~93 GiB) — Dual GPU profile
+﻿# Qwen3.5-122B-A10B Q6_K (~93 GiB) — Dual GPU profile
 #
 # Near the ~98 GiB combined GPU ceiling.
 # Split 2:1 keeps CUDA0 under 32 GB dedicated VRAM (~30 GiB).

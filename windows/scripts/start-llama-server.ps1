@@ -1,4 +1,4 @@
-# Main llama-server launcher.
+﻿# Main llama-server launcher.
 # Model-specific scripts call this with their parameters.
 #
 # Modes:

@@ -1,4 +1,4 @@
-# DeepSeek V4 Flash 0731 MXFP4 (146 GB) - the lossless reference quant.
+﻿# DeepSeek V4 Flash 0731 MXFP4 (146 GB) - the lossless reference quant.
 #
 # The model is QAT with native MXFP4 experts, so this quant IS the original
 # weights; every other quant is equal at best (Q8) or lossy (Q4 and below).

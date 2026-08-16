@@ -344,6 +344,59 @@ row 10 is the number to expect from this layout rather than row 1.
 variable. The default is unchanged, so existing profiles behave as before; the
 DeepSeek profile passes it for the dual layouts and withholds it for CUDA-only.
 
+### Prefill: what is left, and what the noise floor is
+
+A round of tuning aimed specifically at prefill, after the layout itself was
+settled. **Nothing moved it**, and knowing why is worth more than the attempts:
+
+| Attempt | pp @16k | Verdict |
+|---|---:|---|
+| reference (18 layers, `-ub 2048`) | 497.5 / 480.1 / 475.4 | three runs of the *same* config |
+| Windows power mode | — | no effect; see below |
+| `-ub 1024` | 435.7 | −10%, and it frees only 1 GB |
+| 17 expert layers on the iGPU | — | needs 3.4 GB free, cannot be reached |
+| llama.cpp b10453 | — | not run: 12 commits, none touching deepseek/MLA/FA/HIP |
+
+**The noise floor here is ±2–3%.** Three runs of the identical configuration
+span 475–497 pp. Nothing below ~5% should be called an improvement in this file,
+and two earlier single-run comparisons were re-read in that light.
+
+The power-mode attempt is also a lesson in verification: `powercfg
+/overlaysetactive` returns exit 0 and changes nothing, so the first "Best
+performance" measurement was the Balanced setting measured twice. The registry
+value `ActiveOverlayAcPowerScheme` is what to check.
+
+`-ub 1024` was tried to free VRAM for a 19th layer on the fast card — spend the
+micro-batch, buy a layer. It fails twice over: the micro-batch is worth −10%
+while a layer is worth +4.5%, and it frees 1 GB where a layer needs 3.4.
+
+### The prefill lever that is not a flag: prompt structure
+
+The prefix cache is worth more than every flag in this section combined. Same
+rig, same config, measured over HTTP with `cache_prompt` (on by default):
+
+| Request | Tokens actually processed | Time |
+|---|---:|---:|
+| Cold 24 000-token prompt | 24 003 | **52.6 s** |
+| Append 1 400 tokens to it | 1 404 | **3.5 s** |
+| Change the **first** 10 tokens | 25 415 | **55.8 s** |
+| Return to an earlier version of the prompt | 4 | **0.11 s** |
+
+**Appending is 15x cheaper than re-prefilling; changing anything near the start
+costs the whole prompt again.** The last row is the four server slots doing
+their job — an earlier branch of the conversation was still resident.
+
+So on a rig where prefill is the expensive phase, the highest-value change is in
+how prompts are assembled, not in how the server is launched: put the stable
+material first (system prompt, tool definitions, retrieved documents) and let
+only the tail vary. Editing a system prompt costs a full re-prefill — 53 s here,
+against 3.5 s for the same content appended at the end.
+
+`--cache-reuse` does **not** rescue the other cases. Tested at 256 on both a
+prepend and a 400-token insertion in the middle of a 24k document, it reused
+nothing in either: 55.4 s and 53.1 s, indistinguishable from cold. It is not in
+the profile for that reason.
+
 ### Stability: the `deepseek4` HIP fault has not appeared here
 
 Two consecutive 65 380-token prefills with a full cache clear between them,

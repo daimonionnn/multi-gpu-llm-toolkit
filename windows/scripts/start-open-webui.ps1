@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$ContainerName = "open-webui",
     [int]$Port = 3000,
     [string]$ApiBase = "http://host.docker.internal:8080/v1"

@@ -1,4 +1,4 @@
-# MiniMax-M2.5 MXFP4 (~102 GiB) — Dual GPU profile
+﻿# MiniMax-M2.5 MXFP4 (~102 GiB) — Dual GPU profile
 #
 # Model is 101.76 GiB. AMD has ~95 GiB usable, NVIDIA ~31 GiB.
 # Ratio ~3:1 puts ~76 GiB on AMD, ~25 GiB on NVIDIA.

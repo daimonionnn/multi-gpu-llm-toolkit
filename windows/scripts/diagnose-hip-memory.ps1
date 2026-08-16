@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Diagnose HIP memory state on AMD Strix Halo iGPU.
     Run this after changing BIOS UMA allocation (e.g. 64 GB vs 96 GB)
