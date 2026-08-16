@@ -1,4 +1,4 @@
-# Qwen3.5-27B Claude 4.6 Opus Distilled Q4_K_M (~16 GiB)
+﻿# Qwen3.5-27B Claude 4.6 Opus Distilled Q4_K_M (~16 GiB)
 param(
     [ValidateSet("rocm", "cuda", "vulkan", "rocm-cuda", "vulkan-vulkan", "vulkan-cuda")]
     [string]$Mode = "vulkan-vulkan"

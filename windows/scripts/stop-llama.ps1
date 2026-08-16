@@ -1,4 +1,4 @@
-# Stop whatever this project is serving and hand the GPUs back.
+﻿# Stop whatever this project is serving and hand the GPUs back.
 #
 # The recurring failure this exists for: a server is still resident, so the next
 # launch either OOMs, or reports "no CUDA device detected" because the previous
@@ -16,13 +16,27 @@
 #   .\stop-llama.ps1            stop this project's servers, wait for the VRAM
 #   .\stop-llama.ps1 -Status    report only, change nothing
 #   .\stop-llama.ps1 -All       also ask LM Studio to unload (opt-in)
+#   .\stop-llama.ps1 -Help      this text (-h works too)
 
+# PositionalBinding=$false is deliberate and load-bearing. Without it an
+# unrecognised argument is either swallowed or bound to the first positional
+# parameter, so `-h` ran the full stop and `--help` failed with "cannot convert
+# '--help' to System.Int32" — asking a destructive script for help must never
+# be the thing that fires it. Now anything unrecognised aborts before the first
+# process is touched.
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [switch]$Status,
     [switch]$All,
+    [Alias('h', '?')][switch]$Help,
     [int]$TimeoutSec = 300,
     [int[]]$Ports = @(8080, 8081, 8090, 8099)
 )
+
+if ($Help) {
+    Get-Content $PSCommandPath | Select-Object -First 19 | ForEach-Object { $_ -replace '^#\s?', '' }
+    exit 0
+}
 
 $ErrorActionPreference = "Continue"   # a cleanup script must finish its report
 
@@ -93,7 +107,7 @@ Write-Head "Before:"
 Show-Gpu
 Show-Ports
 foreach ($p in $found.Ours)    { Write-Info ("ours:  {0} (pid {1})  {2}" -f $p.Name, $p.ProcessId, $p.ExecutablePath) }
-foreach ($p in $found.Foreign) { Write-Host ("  other: {0} (pid {1}) — left alone  {2}" -f $p.Name, $p.ProcessId, $p.ExecutablePath) -ForegroundColor DarkGray }
+foreach ($p in $found.Foreign) { Write-Host ("  other: {0} (pid {1}) - left alone  {2}" -f $p.Name, $p.ProcessId, $p.ExecutablePath) -ForegroundColor DarkGray }
 
 if ($Status) { exit 0 }
 
@@ -149,7 +163,7 @@ if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
     } while ((Get-Date) -lt $deadline)
 
     if ($used -ge 4000) {
-        Write-Warning "NVIDIA still holds $used MiB after ${TimeoutSec}s — see the process list below"
+        Write-Warning "NVIDIA still holds $used MiB after ${TimeoutSec}s - see the process list below"
     }
 }
 

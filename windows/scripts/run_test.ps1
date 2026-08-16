@@ -1,4 +1,4 @@
-$payload = @{
+﻿$payload = @{
     prompt = "test"
     n_predict = 10
 }

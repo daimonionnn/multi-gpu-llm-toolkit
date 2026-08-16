@@ -183,6 +183,27 @@ There are **two independent bugs** affecting HIP memory on Strix Halo. Full deta
 
 **Do NOT set** `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1` — `hipMallocManaged` is broken on Strix Halo (gfx1151). See [../doc/rocm-bugs.md](../doc/rocm-bugs.md#known-issue-hipmallocmanaged-is-broken-on-strix-halo).
 
+## Editing these scripts
+
+**Keep the UTF-8 BOM on every `.ps1`.** Windows PowerShell 5.1 — still the
+default `powershell.exe` on Windows 11 — reads a BOM-less script in the system
+code page, not UTF-8. A non-ASCII character then decodes into something else,
+and if that something else is a curly quote (which is what an em dash becomes)
+PowerShell treats it as a string delimiter and the file fails to parse with a
+cascade of "Unexpected token" and "Missing closing '}'" errors pointing at lines
+that are fine. PowerShell 7 reads UTF-8 regardless, so this is invisible until
+someone runs the script the normal way.
+
+Both belts are worn here: every script is saved with a BOM, and non-ASCII
+characters are kept out of string literals. Section separators in comments are
+harmless either way — a stray quote inside a comment ends with the line.
+
+Test parsing under both hosts after editing:
+
+```powershell
+powershell.exe -NoProfile -Command "[System.Management.Automation.Language.Parser]::ParseFile('$PWD\scripts\stop-llama.ps1',[ref]`$null,[ref]`$e); `$e"
+```
+
 ## Prerequisites
 
 > These are the prerequisites for **building** backends with `setup-llama.ps1`.
@@ -320,7 +341,11 @@ $env:LLM_MODELS_DIR = "D:\models"
 .\scripts\stop-llama.ps1            # stop this project's servers, wait for the VRAM
 .\scripts\stop-llama.ps1 -Status    # report only, change nothing
 .\scripts\stop-llama.ps1 -All       # also ask LM Studio to unload (opt-in)
+.\scripts\stop-llama.ps1 -h         # usage
 ```
+
+Unknown arguments abort before anything is touched — for a script that kills
+processes, `-h` must not be the thing that fires it.
 
 Run this before launching a different profile. A resident server makes the next
 launch fail in three different-looking ways — an OOM, a "no CUDA device

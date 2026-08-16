@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$RepoDir = (Join-Path $PSScriptRoot "..\llama.cpp"),
     [ValidateSet("rocm-cuda","vulkan","vulkan-cuda")]
     [string]$Backend = "rocm-cuda"

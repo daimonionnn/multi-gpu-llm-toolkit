@@ -1,4 +1,4 @@
-# Build and run membw.c — the streaming-read bandwidth benchmark that prices CPU
+﻿# Build and run membw.c — the streaming-read bandwidth benchmark that prices CPU
 # expert offload. See doc/performance-model.md for what the number is used for.
 #
 # Prints the same line as linux/scripts/membw.c so the rigs compare directly:
