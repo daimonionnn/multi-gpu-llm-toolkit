@@ -47,9 +47,14 @@ Tests the true end-to-end experience of a client interacting with `llama-server`
 
 Measured 2026-08-15, the day the RTX 5090 was replaced by an RTX PRO 6000. Same
 model, same quant and the same 96 GB card as the `dual-linux` section below, so
-the two are unusually comparable — except for the link: PCIe 5.0 x16 there,
-**four external lanes** here (~8 GB/s). That one difference decides the whole
-tuning, in both directions.
+the two are unusually comparable — except for the link: a full-width CPU slot
+there, **four external lanes** here (~8 GB/s). That one difference decides the
+whole tuning, in both directions.
+
+> An earlier revision called the `dual-linux` link "PCIe 5.0 x16". That was the
+> slot's nominal capability, not a measured width, and *Rewiring: the AMD card
+> off the CPU slot* below shows it was not what the card effectively had while
+> the AMD card shared the CPU lanes.
 
 The rig changed under measurement, which is why the tables carry a hardware
 column. The card started the day on a **Thunderbolt 5** tunnel; OCuLink was made
@@ -1007,6 +1012,68 @@ things keep it on the radar: TCP pipeline parallelism could in principle chain
 a CUDA process and a ROCm process as separate stages (prefill gains only), and
 its first-class Strix Halo support with SSD expert streaming makes it a strong
 candidate for the planned `halo-linux` rig.
+
+### Rewiring: the AMD card off the CPU slot, 2026-08-17
+
+The R9700 was moved out of the second CPU slot and now hangs off a switched
+path on chipset root port `1d.4`, so the RTX PRO 6000 has the CPU lanes to
+itself. Both ends of that trade are measurable, and they point in opposite
+directions.
+
+The AMD card still enumerates normally — `ROCm0`, 32 GB, gfx1201, and it loads
+expert layers as before. What changed is the link. Reading each hop of the
+chain from sysfs:
+
+```
+1d.4-[b0-b2]--00.0-[b1-b2]--00.0-[b2]--00.0  Radeon AI PRO R9700
+       ^ x4 @ 16.0 GT/s          x16 @ 32 GT/s from here on
+```
+
+The device negotiates x16 gen5 with the last bridge, so `current_link_width`
+read at the card alone says x16 and means nothing. The binding hop is the
+first one: **PCIe 4.0 x4, ~7.9 GB/s**. The NVIDIA card reads x16 with a gen5
+ceiling on CPU root port `06.0`.
+
+Measured with the same harness as the `-ub` table above — HTTP, single
+request, 128 predicted tokens, `-c 131072`, `-b 4096 -ub 2048` verified on the
+running process rather than assumed:
+
+| Profile | metric | before | after | Δ |
+|---|---|---:|---:|---:|
+| `--cuda-only` (`ncmoe 18`) | pp 4k | 1175 | **1399** | **+19%** |
+| | pp 16k | 1175 | **1532** | **+30%** |
+| | tg | 16.4 | **17.5–18.2** | **+6–11%** |
+| default dual (`ncmoe 10` + `-ot`) | pp 4k | 937 | **561** | **−40%** |
+| | pp 16k | 947 | **615** | **−35%** |
+| | tg | 24.6 | 22.8–23.3 | −6–7% |
+
+**The profile that never touches the AMD card got faster, and the one that
+does got slower.** Both follow from the same rewiring. CUDA-only keeps 18
+expert layers in system RAM and streams them to the GPU, so host-to-GPU
+bandwidth is its prefill bottleneck — widening that link is worth 19-30%. The
+dual keeps expert layers 35-42 in AMD VRAM, and every prefill batch now pushes
+their activations through four lanes. Generation loses only ~6% because a
+single token moves far less across the link than a 2048-token micro-batch.
+
+This inverts the recommendation in *Which MXFP4 profile* above on the one axis
+where the dual still won. The dual was already off the table for unattended
+duty because of the HSA fault; it now loses prefill by a factor of 2.5 as
+well, and keeps only its generation lead.
+
+**Correction.** The `halo-win` section above says the `dual-linux` card sat on
+"PCIe 5.0 x16" while comparing it to four external lanes. The CUDA-only gain
+measured here says that was not the effective width before this rewiring —
+had it been, freeing the lanes could not have bought 30% of prefill. The
+earlier statement is best read as the slot's nominal capability. The
+pre-rewiring topology was not recorded and cannot be reconstructed now.
+
+**Caveat on precision.** Each cell here is a single run on a fresh server
+instance, not the interleaved arms used for the `-ub` and thread tables. The
+threads section above is a standing warning about exactly this: a
+cross-instance comparison there manufactured a +6.3% that dissolved under
+interleaving. The directions and magnitudes are far outside that noise floor —
+35-40% against ~1% — but the individual percentages deserve a proper
+interleaved re-run before being quoted.
 
 ### RAM swap: 4 DIMMs @ 6267 -> 2 DIMMs @ 7400 MT/s
 
