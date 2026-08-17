@@ -841,7 +841,7 @@ The mainline profiles never set `-b`/`-ub` either, so they ran on llama.cpp's
 | 4096 / 1024 | 833 | 891 | 887 | 25.0 | |
 | **4096 / 2048** | **937** | **947** | **907** | 24.6 | **best; clean in both rounds** |
 | 4096 / 3072 | 898 | — | — | 24.1 | run ended in the HSA fault |
-| 8192 / 4096 | 964 | **OOM** | — | 24.3 | loads, then cannot allocate at 16k |
+| 8192 / 4096 | 964 | **OOM** | — | 24.3 | cannot allocate at 16k **on this dual arm** (`-ncmoe 10`); fine on `--cuda-only`, see below |
 | 8192 / 8192 | — | — | — | — | will not load |
 | `--no-op-offload` | 282 | 278 | 272 | 26.3 | diagnostic |
 
@@ -861,6 +861,11 @@ allocated:
 | default (128k, dual) | 10 | 947 | 595 |
 | `--256k` (dual) | 12 | 839 | — |
 | **`--cuda-only`** | 18 | **1175** | **~305** |
+
+> Superseded for `--cuda-only`. These arms were measured while the NVIDIA card
+> was on gen5 x8. On the widened link the same profile re-tunes to **8192/4096
+> for 1732 pp** — see *Re-tuned on the wider link* below. The dual rows still
+> stand; they were not re-measured.
 
 The CUDA-only profile gains **almost 4x**, far more than the dual — and that
 follows from the mechanism rather than contradicting it. It keeps 18 expert
@@ -1088,6 +1093,93 @@ cross-instance comparison there manufactured a +6.3% that dissolved under
 interleaving. The directions and magnitudes are far outside that noise floor —
 35-40% against ~1% — but the individual percentages deserve a proper
 interleaved re-run before being quoted.
+
+#### What binds prefill now: the GPU, not the link
+
+The arithmetic above says the link dropped to 37% utilisation. Telemetry says
+the same thing directly. Sampled once a second with `nvidia-smi dmon -s ut`
+across a 38 000-token prefill on the CUDA-only profile, 31 active samples:
+
+| | min | avg | max |
+|---|---:|---:|---:|
+| SM utilisation | 0% | **96%** | 100% |
+| VRAM controller | 0% | 18% | 46% |
+| PCIe rx | — | **24.6 GB/s** | **52.6 GB/s** |
+| PCIe tx | — | 2.1 GB/s | 4.1 GB/s |
+
+**The GPU is busy 96% of the time while the link averages 24.6 GB/s** — the
+same figure the batch arithmetic predicts. The link is not starving the GPU;
+it bursts to 52.6 GB/s when it does move, and idles the rest of the time
+because the GPU is computing.
+
+That peak is also an independent confirmation of the rewiring. **Neither gen5
+x8 nor gen4 x16 can carry more than ~31.5 GB/s**, so 52.6 GB/s is only
+reachable on a full gen5 x16 link. The rewiring did what it was supposed to.
+
+A second line of evidence needs no instrumentation: prefill now *falls with
+context* — 1532 t/s at 16k against 1200 t/s at 38k. A transfer-bound layout
+would be roughly flat, because the bytes shipped per batch do not depend on
+how long the context is. Attention does, and it is now visible.
+
+> **What `SM %` does and does not mean.** It is the fraction of sampled time
+> with at least one kernel resident, not achieved occupancy and not a fraction
+> of peak FLOPs. 96% is solid evidence that the GPU is *not waiting on data*;
+> it is not evidence that the compute is efficient. A low-occupancy kernel
+> would read the same. Distinguishing the two needs Nsight Compute, which has
+> not been run here.
+
+The practical consequence is that the `-ub` tuning above was done against a
+link that no longer binds, so its optimum need not still hold — which is what
+the next section goes and checks.
+
+#### Re-tuned on the wider link: 8192/4096, +13.5% prefill
+
+Ten arms on the CUDA-only profile, each a fresh server instance, same harness
+(`-c 131072`, 128 predicted tokens, 4k and 16k):
+
+| `-ncmoe` | `-b`/`-ub` | pp 4k | pp 16k | tg 16k | |
+|---:|---|---:|---:|---:|---|
+| 18 | 4096 / 2048 | 1404.7 | 1525.3 | 17.55 | previous default |
+| 18 | **8192 / 4096** | **1565.1** | **1731.6** | 17.38 | **new default** |
+| 17 | 8192 / 4096 | 1565.7 | 1732.9 | 17.55 | |
+| 16 | 8192 / 4096 | 1564.1 | 1727.5 | 17.36 | |
+| 18 | 4096 / 3072 | 1376.1 | 1469.2 | 17.50 | |
+| 22 | 8192 / 4096 | 1460.9 | 1620.9 | 14.82 | |
+| 22 | 4096 / 2048 | 1252.3 | 1373.4 | 15.07 | |
+| 26 | 8192 / 8192 | 1345.8 | 1475.8 | 13.03 | |
+| 18 | 8192 / 8192 | — | — | — | fails to create context |
+| 18 | 16384 / 8192 | — | — | — | fails to create context |
+
+**`-ub` must divide `-b` evenly.** This is the result that does not follow
+from "bigger is better": 4096/3072 measures *below* 4096/2048 (1469 against
+1525), because 4096 splits into 3072 + 1024 and the runt micro-batch wastes a
+pass. Every good arm here is exactly `-ub = -b/2`.
+
+**8192 is the ceiling.** Both `-ub 8192` and `-b 16384` fail during context
+creation, so the previous note that "-ub 4096 loads and serves 4k, then cannot
+allocate at 16k" was a property of the *dual* arm at `--n-cpu-moe 10`, not of
+`-ub 4096` as such. CUDA-only keeps 18 expert layers in RAM instead of 10, and
+that free VRAM is exactly what pays for the larger compute buffers.
+
+**`-ncmoe` 16, 17 and 18 are indistinguishable** — 1727–1733 pp, a 0.3%
+spread that is inside run-to-run noise. 18 stays the default because it is the
+one that leaves the most VRAM for KV as the context grows; buying nothing at
+the cost of headroom is a bad trade. Above 18 both axes fall away steadily
+(tg 17.4 → 14.8 → 13.0 at 18/22/26), since each extra offloaded layer is
+another expert matmul fed from DDR5 at generation time.
+
+Net: **+11–13% prefill, generation unchanged** (−1%, in noise). Shipped in
+`start-deepseek-mxfp4-nvidia-amd-cpu.sh` as a per-arm `BATCH_ARGS`; the dual
+arms keep 4096/2048, which is what their VRAM allows.
+
+A confirmation run of the *shipped* profile — flags coming from the script
+rather than from a sweep override — returned **1699.2 pp / 17.38 tg at 16k**,
+1.9% under the sweep's 1731.6. That gap is the same cross-instance
+variability the threads section warns about, so **+11.4% over the old default
+is the figure to quote**, not the sweep's best arm.
+
+The dual was not re-tuned. It is no longer the prefill path worth optimising
+on this wiring, and its larger-batch arms historically ended in the HSA fault.
 
 ### RAM swap: 4 DIMMs @ 6267 -> 2 DIMMs @ 7400 MT/s
 

@@ -51,6 +51,7 @@ MODEL="$MODELS_DIR/lmstudio-community/DeepSeek-V4-Flash-0731-GGUF/DeepSeek-V4-Fl
 MODE_ARGS=(--mode rocm-cuda)
 OT_ARGS=(-ts 0,1 -ot 'blk\.(3[5-9]|4[0-2])\.ffn_.*_exps.*=ROCm0')
 MODEL_ARGS=(-c 131072 --n-cpu-moe 10)
+BATCH_ARGS=(-b 4096 -ub 2048)
 if [[ "${1:-}" == "--256k" ]]; then
     shift
     # KV needs ~13 GB on CUDA0, so two more expert layers are exiled to RAM.
@@ -65,15 +66,26 @@ elif [[ "${1:-}" == "--cuda-only" ]]; then
     MODE_ARGS=(--mode cuda)
     OT_ARGS=()
     MODEL_ARGS=(-c 131072 --n-cpu-moe 18)
+    # Twice the batch of the dual arms, and only this arm can afford it: with
+    # 18 expert layers in RAM instead of 10, CUDA0 has the free VRAM for the
+    # bigger compute buffers. Re-tuned 2026-08-17 once the x16 link stopped
+    # binding - 1525 -> 1732 pp at 16k (+13.5%), generation unchanged.
+    # -b 16384 and -ub 8192 both fail to create the context; this is the
+    # ceiling. Keep -ub at exactly half of -b: an uneven split is worse than
+    # a smaller even one (4096/3072 measures 1469, below 4096/2048's 1525).
+    BATCH_ARGS=(-b 8192 -ub 4096)
 fi
 [[ "${1:-}" == "--" ]] && shift
 
-# -b 4096 -ub 2048 is worth +55-60% of prefill over llama.cpp's 2048/512
-# (937/947/907 against 565/595/597 pp at 4k/16k/32k), at no cost to
-# generation. Larger micro-batches let more tokens share one load of an
-# expert's weights, which is the dominant cost once experts live off the GPU.
-# 2048 and not more: -ub 4096 loads and serves 4k, then cannot allocate at 16k.
-# Numbers in doc/benchmarks.md.
+# Batching is worth +55-60% of prefill over llama.cpp's 2048/512 (937/947/907
+# against 565/595/597 pp at 4k/16k/32k on the dual), at no cost to generation.
+# Larger micro-batches let more tokens share one load of an expert's weights,
+# which is the dominant cost once experts live off the GPU.
+#
+# The size is per-arm and set in BATCH_ARGS above, because what fits depends on
+# how much VRAM the arm left free: the dual arms hold expert layers on CUDA0
+# and cap out at 4096/2048, while --cuda-only has 18 layers in RAM and takes
+# 8192/4096. Numbers in doc/benchmarks.md.
 #
 # --no-mmap is unconditional here because every mode offloads experts to system
 # RAM (--n-cpu-moe 10/12/18), and llama.cpp warns on startup that mmap costs
@@ -88,7 +100,7 @@ exec "$SCRIPT_DIR/start-llama-server.sh" "${MODE_ARGS[@]}" \
     ${OT_ARGS[@]+"${OT_ARGS[@]}"} \
     -ngl 99 \
     -fa on \
-    -b 4096 -ub 2048 \
+    "${BATCH_ARGS[@]}" \
     --no-mmap \
     --jinja \
     "$@"
