@@ -1132,7 +1132,7 @@ The practical consequence is that the `-ub` tuning above was done against a
 link that no longer binds, so its optimum need not still hold — which is what
 the next section goes and checks.
 
-#### Re-tuned on the wider link: 8192/4096, +13.5% prefill
+#### Re-tuned on the wider link: 8192/4096, +11% prefill
 
 Ten arms on the CUDA-only profile, each a fresh server instance, same harness
 (`-c 131072`, 128 predicted tokens, 4k and 16k):
@@ -1180,6 +1180,86 @@ is the figure to quote**, not the sweep's best arm.
 
 The dual was not re-tuned. It is no longer the prefill path worth optimising
 on this wiring, and its larger-batch arms historically ended in the HSA fault.
+
+#### Power limit and memory clock: +3–5% and +2–3%
+
+Two card-level knobs, measured after the batch re-tune. Every row below is
+`--cuda-only` at `8192/4096` on **one** server instance, so the memory arms
+are directly comparable; the power arms are not, and say so.
+
+**The 500 W the card had been running was not stock.** Both
+`power.default_limit` and `power.max_limit` read 600 W — the 500 W cap was
+set on this machine, not a factory value. Restoring it is free.
+
+| 600 W, memory offset | pp 4k | pp 16k | tg (512 tok, 3×) |
+|---|---:|---:|---:|
+| stock (14001 MHz) | 1701.8 | 1783.7 | 17.705 |
+| +2506 MT/s | 1731.6 | 1817.9 | — |
+| +4001 MT/s | 1722.7 | 1820.0 | — |
+| +5002 MT/s | 1739.7 | **1822.9** | **18.217** |
+
+**Prefill saturates on the first step; generation does not.** Memory buys
++1.9% of prefill and then nothing (+2.0%, +2.2%), while generation gains
+**+2.9%**. A prefill micro-batch is 4096 tokens wide, so memory latency
+amortises across it; a generated token waits on its own dependent chain of
+VRAM reads with nothing to hide behind.
+
+Generation was measured with 512 predicted tokens, three repeats, spread
+0.24–0.47%. `--predict 128` is too short for this: it returned 17.50 and 17.69
+for the *same* configuration, so the ~2% tg differences in an earlier revision
+of this section were mostly artefact.
+
+**Power limit, +3 to 5% of prefill.** 1783.7 at 600 W against 1699.2 on the
+shipped profile or 1731.6 during the sweep — both 500 W figures come from
+different server instances, which is the ±2% cross-instance spread the threads
+section warns about, so this one is a band and not a point. The mechanism is
+in the telemetry: average draw during prefill is only ~395 W, but the peak
+reaches **563 W**, so the old 500 W cap clipped peaks while leaving the
+average untouched.
+
+> **`utilization.memory` is a time metric, not a headroom metric — and it
+> misled two predictions here.** The VRAM controller reads 18% during prefill
+> and 12% during generation, from which this document predicted first that
+> memory overclocking would do nothing for prefill (it does ~2%), then that it
+> would do under 1% for generation (it does 2.9%). The counter reports
+> percent-of-time-busy; it says nothing about whether memory *latency* sits on
+> the critical path, which during generation it does. Same error as the
+> activation-volume forecast further up: both reasoned from average volume,
+> both underestimated a latency-bound cost.
+
+**Units: LACT labels the memory offset "MHz"; it is MT/s.** Confirmed three
+times — offsets of 2506, 4001 and 5002 moved `clocks.max.memory` by 1253, 2000
+and 2501 MHz, exactly half each time, because the underlying NVIDIA knob is a
+*transfer rate* offset. The +6000 maximum the tool offers is therefore +3000
+MHz of real clock, and stock 14001 MHz is 28 Gbps GDDR7 as specified. Under
+load the card settles a constant 636 MHz below whatever ceiling the offset
+sets (15365 against 16001, 15866 against 16502): not a wall, it scales.
+
+Nothing here soaked the overclock. Memory OC of this size fails silently under
+inference — quietly worse output rather than a crash — so +5002 is what the
+card is set to, not a recommendation.
+
+#### The resulting configuration, 4k to 128k
+
+`--cuda-only`, `-b 8192 -ub 4096`, `--n-cpu-moe 18`, 600 W, memory +5002,
+256 predicted tokens:
+
+| Context | Prompt tokens | pp t/s | tg t/s | Time to first token |
+|---|---:|---:|---:|---:|
+| 4k | 3 809 | 1737.2 | 17.87 | **2.2 s** |
+| 65k | 65 255 | 1515.6 | 17.11 | **43.1 s** |
+| 128k | 130 789 | 1186.3 | 16.68 | **110.3 s** |
+
+Prefill loses 31.7% between 4k and 128k; generation loses 6.7%. Attention grows
+with context on both paths, but prefill pays it across the whole prompt while
+generation pays it once per token, on top of a DDR5-bound expert stream that
+does not care how long the context is.
+
+The last column is what decides how the rig feels. The 63.5k hermes
+conversation took ~208 s to first token before any of this, ~54 s after the
+`-ub` tuning, and **43 s** now — 4.8x off the original. The full window costs
+110 s, which is why 65k stays the comfortable operating point and 128k is the
+one you choose deliberately.
 
 ### RAM swap: 4 DIMMs @ 6267 -> 2 DIMMs @ 7400 MT/s
 
