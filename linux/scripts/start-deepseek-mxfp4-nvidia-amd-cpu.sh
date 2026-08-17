@@ -87,6 +87,21 @@ fi
 # and cap out at 4096/2048, while --cuda-only has 18 layers in RAM and takes
 # 8192/4096. Numbers in doc/benchmarks.md.
 #
+# -t/-tb: llama.cpp defaults to 4 threads here, and 4 is far too few for any arm
+# of this profile. At batch size 1 the offloaded expert layers are computed on
+# the CPU rather than shipped to the GPU, so generation is real host arithmetic:
+# an interleaved trial on --cuda-only (4 -> 24 threads, two passes each, 512
+# predicted tokens) measured +6.5% generation for +0.7% prefill, and CPU use
+# during generation is 304% of a core at 4 threads against 778% at 24. Prefill
+# is untouched because there the weights go to the GPU and one thread only
+# orchestrates. Measured on --cuda-only; the dual arms keep experts in RAM by
+# the same mechanism, and doc/benchmarks.md measured +2-4.5% for them earlier.
+#
+# nproc rather than a literal 24: right on this rig, and it does not silently
+# become wrong on another. Note it counts logical CPUs, so on an SMT machine
+# this would oversubscribe and want halving.
+THREAD_ARGS=(-t "$(nproc)" -tb "$(nproc)")
+
 # --no-mmap is unconditional here because every mode offloads experts to system
 # RAM (--n-cpu-moe 10/12/18), and llama.cpp warns on startup that mmap costs
 # performance whenever tensors are overridden to the CPU. The all-VRAM profiles
@@ -101,6 +116,7 @@ exec "$SCRIPT_DIR/start-llama-server.sh" "${MODE_ARGS[@]}" \
     -ngl 99 \
     -fa on \
     "${BATCH_ARGS[@]}" \
+    "${THREAD_ARGS[@]}" \
     --no-mmap \
     --jinja \
     "$@"

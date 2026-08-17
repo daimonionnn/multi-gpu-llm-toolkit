@@ -1239,21 +1239,78 @@ Nothing here soaked the overclock. Memory OC of this size fails silently under
 inference — quietly worse output rather than a crash — so +5002 is what the
 card is set to, not a recommendation.
 
+#### Threads, re-measured: +6.5% generation, and why prefill only burns one core
+
+The threads section further up concluded `-t 24 -tb 24` was worth ~3% of
+generation and then never reached the profiles, which kept running on
+llama.cpp's default of **4 threads out of 24**. Re-measured on `--cuda-only`,
+interleaved 4/24/4/24 because the arms need a restart and the effect is the
+size of the cross-instance spread:
+
+| Arm | tg (512 tok, 3×) | CPU during generation |
+|---|---:|---:|
+| 4 threads, pass 1 | 18.519 | 304% of a core |
+| 4 threads, pass 2 | 18.425 | 304% |
+| **24 threads, pass 1** | **19.716** | 779% |
+| **24 threads, pass 2** | **19.638** | 776% |
+
+**+6.5%**, double the earlier figure, and unambiguous: repeats within an arm
+differ by 0.4–0.5% against a 6.5% gap between arms. Prefill, interleaved the
+same way, moves **+0.7%** (1730.5 → 1742.5 pp at 16k) — nothing, matching the
+earlier +0.2%.
+
+The reason those two numbers differ so much is the same thing that answers a
+question the CPU load raises. **During prefill exactly one core is at 100% —
+1.0 of 24, 8.2% of the box** — and it is not moving data:
+
+| | PCIe rx | process CPU |
+|---|---:|---:|
+| prefill (38k) | 24.6 GB/s | 101% of a core |
+| generation (512 tok) | 1.7 GB/s | 302% of a core |
+
+Generation moves **14x less** over the link and uses **3x more** CPU, which
+rules out the intuitive explanation that the busy core is feeding PCIe. The
+arithmetic rules it out independently: sustaining 24.6 GB/s by CPU copy is
+impossible when this machine's DDR5 does 89.9 GB/s across 16 threads, i.e.
+~5.6 GB/s per core. The transfers are DMA; the core walks the graph, issues
+copies and kernel launches, and busy-polls for completion — serial by nature,
+hence exactly one core, and spinning rather than working.
+
+Generation is the opposite: at batch size 1 it is not worth shipping expert
+weights to the GPU, so the offloaded layers are computed **on the CPU** from
+DDR5. That is real arithmetic, it parallelises, and it is why threads move
+generation and not prefill. 24 threads reach 778% of a core rather than 2400%,
+so DDR5 saturates long before the cores do.
+
+None of this makes the core a bottleneck: SM sits at 96% during prefill, and
+doubling `-b` — which halves the number of weight-shipping rounds — bought
++13.5% rather than the ~2x a copy-bound path would have given.
+
+Now shipped as `THREAD_ARGS` on all three arms, from `nproc`.
+
 #### The resulting configuration, 4k to 128k
 
-`--cuda-only`, `-b 8192 -ub 4096`, `--n-cpu-moe 18`, 600 W, memory +5002,
-256 predicted tokens:
+`--cuda-only`, `-b 8192 -ub 4096`, `--n-cpu-moe 18`, `-t 24 -tb 24`, 600 W,
+memory offset +3009 MT/s, 256 predicted tokens:
 
 | Context | Prompt tokens | pp t/s | tg t/s | Time to first token |
 |---|---:|---:|---:|---:|
-| 4k | 3 809 | 1737.2 | 17.87 | **2.2 s** |
-| 65k | 65 255 | 1515.6 | 17.11 | **43.1 s** |
-| 128k | 130 789 | 1186.3 | 16.68 | **110.3 s** |
+| 4k | 3 809 | 1760.8 | 18.55 | **2.2 s** |
+| 65k | 65 255 | 1505.3 | 17.10 | **43.4 s** |
+| 128k | 130 789 | 1179.9 | 16.66 | **110.9 s** |
 
-Prefill loses 31.7% between 4k and 128k; generation loses 6.7%. Attention grows
+Prefill loses 33.0% between 4k and 128k; generation loses 10.2%. Attention grows
 with context on both paths, but prefill pays it across the whole prompt while
 generation pays it once per token, on top of a DDR5-bound expert stream that
 does not care how long the context is.
+
+> **The thread gain appears to be a short-context gain.** Against the previous
+> run of this same sweep, 4k generation rose 17.87 → 18.55 while 65k and 128k
+> did not move at all (17.11 → 17.10, 16.68 → 16.66). The likely reason is that
+> the CPU expert compute threads help with is a shrinking share of each token as
+> attention over a larger KV cache takes over. Treat it as a hypothesis, not a
+> result: the two sweeps also differ in memory offset (+5002 against +3009), so
+> the comparison is not clean. Worth an interleaved run at 65k to settle.
 
 The last column is what decides how the rig feels. The 63.5k hermes
 conversation took ~208 s to first token before any of this, ~54 s after the
