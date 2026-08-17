@@ -52,9 +52,10 @@ there, **four external lanes** here (~8 GB/s). That one difference decides the
 whole tuning, in both directions.
 
 > An earlier revision called the `dual-linux` link "PCIe 5.0 x16". That was the
-> slot's nominal capability, not a measured width, and *Rewiring: the AMD card
-> off the CPU slot* below shows it was not what the card effectively had while
-> the AMD card shared the CPU lanes.
+> slot's nominal capability. With the AMD card populating the second slot the
+> board split its CPU lanes and the NVIDIA card actually ran at **gen5 x8** —
+> inferred from link arithmetic, then confirmed by measurement in *Rewiring:
+> the AMD card off the CPU slot* below.
 
 The rig changed under measurement, which is why the tables carry a hardware
 column. The card started the day on a **Thunderbolt 5** tunnel; OCuLink was made
@@ -1060,12 +1061,25 @@ where the dual still won. The dual was already off the table for unattended
 duty because of the HSA fault; it now loses prefill by a factor of 2.5 as
 well, and keeps only its generation lead.
 
-**Correction.** The `halo-win` section above says the `dual-linux` card sat on
-"PCIe 5.0 x16" while comparing it to four external lanes. The CUDA-only gain
-measured here says that was not the effective width before this rewiring —
-had it been, freeing the lanes could not have bought 30% of prefill. The
-earlier statement is best read as the slot's nominal capability. The
-pre-rewiring topology was not recorded and cannot be reconstructed now.
+**This settles the x8 question.** [systems.md](systems.md) and
+[performance-model.md](performance-model.md) had already argued from link
+arithmetic that the NVIDIA card was running at **gen5 x8**, not the x16 the
+inventory recorded, because the board splits its CPU lanes when the second
+slot is populated. Confirmed: freeing those lanes bought 30% of prefill,
+which is impossible if the card already had x16. Implied link throughput in
+the CUDA-only layout moves accordingly — 62.66 GB per batch over 4096/1532 s
+is **23.4 GB/s**, against 18.0 GB/s before.
+
+**Both standing predictions were half right.** *Still open* in systems.md
+proposed exactly this rewiring and forecast two things:
+
+| Prediction | Outcome |
+|---|---|
+| Restoring x16 raises CUDA-only prefill to ~1800–2400 pp | **Over-forecast.** Measured 1532. At 23.4 GB/s the link is only 37% utilised, so it is no longer the binding constraint — the hedge that "the bottleneck moves elsewhere" was right, and it moves sooner than the arithmetic suggested. |
+| A chipset x4 slot costs the dual only single-digit percent, since it carries ~1 GB of activations per micro-batch rather than 62.66 GB of weights | **Wrong.** The dual lost 35–40% of prefill. Activation volume alone does not predict the cost; the four-lane hop sits in the critical path of every micro-batch, and latency there is not amortised the way a bulk weight transfer is. |
+
+The second miss is the more useful one: it means "the dual barely uses the
+link" is not a safe assumption when deciding where to put a second card.
 
 **Caveat on precision.** Each cell here is a single run on a fresh server
 instance, not the interleaved arms used for the `-ub` and thread tables. The

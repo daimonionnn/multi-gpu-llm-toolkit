@@ -145,8 +145,8 @@ Details in [rocm-bugs.md](rocm-bugs.md).
 |-----------|-----|
 | CPU       | Intel Core Ultra 7 270K Plus (Arrow Lake-S) |
 | RAM       | 122 GiB usable — 2×64 GB (Corsair 6400C42) at **7400 MT/s** (previously 2×48+2×64 mixed at 6267) |
-| GPU 1     | AMD Radeon AI PRO R9700 (Gigabyte AI TOP) — RDNA 4, Navi 48, gfx1201, 31.9 GiB |
-| GPU 2     | NVIDIA RTX PRO 6000 Blackwell Workstation Edition — 95.6 GiB, compute 12.0, PCIe 5.0 x16 |
+| GPU 1     | AMD Radeon AI PRO R9700 (Gigabyte AI TOP) — RDNA 4, Navi 48, gfx1201, 31.9 GiB, **chipset-fed PCIe 4.0 x4** since 2026-08-17 |
+| GPU 2     | NVIDIA RTX PRO 6000 Blackwell Workstation Edition — 95.6 GiB, compute 12.0, **PCIe 5.0 x16** (genuinely x16 since 2026-08-17; it ran at x8 while the AMD card shared the CPU lanes) |
 | OS        | Ubuntu 26.04 LTS, kernel 7.0.0-29-generic |
 | AMD stack | ROCm 7.1 (distro packages — `libamdhip64-7` 7.1.0, `rocminfo`/`rocm-smi` 7.1.1) |
 | NVIDIA    | Driver 595.84, CUDA Toolkit 13.3 at `/usr/local/cuda-13.3` (NVIDIA repo) |
@@ -179,10 +179,28 @@ of it is real VRAM rather than carved-out system RAM.
 
 ### Still open
 
-- **PCIe topology — the recorded "gen5 x16" is probably wrong.** This entry used
-  to state that the RTX PRO 6000 negotiates gen5 x16 with both cards installed.
-  The measurements do not support it, and a board that splits its CPU lanes
-  x8/x8 when the second slot is populated would explain everything.
+- ~~**PCIe topology — the recorded "gen5 x16" is probably wrong.**~~
+  **Resolved 2026-08-17: it was x8.** The AMD card was moved to a chipset-fed
+  slot, and CUDA-only prefill at 16k rose 1175 → **1532 pp** (+30%), which is
+  impossible if the NVIDIA card already had x16. Implied link throughput went
+  18.0 → **23.4 GB/s**, i.e. 37% of gen5 x16 — the link is no longer the
+  binding constraint, which is why the gain stopped well short of the
+  1800–2400 pp forecast below.
+
+  The companion forecast — that a narrow slot would cost the dual only
+  single-digit percent — **did not hold**: the dual lost 35–40% of prefill
+  (947 → 615 @16k) and ~6% of generation. Activation volume alone does not
+  predict the cost of a narrow hop in the critical path. Numbers and method in
+  [benchmarks.md](benchmarks.md), *Rewiring: the AMD card off the CPU slot*.
+
+  <details>
+  <summary>The original reasoning, kept because the arithmetic is the reusable
+  part — and because one of its two forecasts failing is instructive</summary>
+
+  This entry used to state that the RTX PRO 6000 negotiates gen5 x16 with both
+  cards installed. The measurements do not support it, and a board that splits
+  its CPU lanes x8/x8 when the second slot is populated would explain
+  everything.
 
   The check is arithmetic. In the CUDA-only layout the link carries the
   RAM-hosted expert weights once per batch — 62.66 GB at `--n-cpu-moe 18`,
@@ -221,8 +239,22 @@ of it is real VRAM rather than carved-out system RAM.
   both the 1175→~2000 pp prefill path and the 21–25 tg dual path available on
   the same machine.
 
-  The R9700's own link width has still not been read (needs root for
-  `lspci -vv`).
+  </details>
+
+  **How to read link width, since this cost a revision to get right.** The
+  R9700's own width can be read without root — sysfs exposes
+  it per device, which `lspci -vv` does not do unprivileged:
+
+  ```bash
+  for f in current_link_speed current_link_width max_link_width; do
+      echo "$f: $(cat /sys/bus/pci/devices/0000:b2:00.0/$f)"
+  done
+  ```
+
+  Read it at **every hop**, not just at the card. The R9700 sits behind two
+  bridges and negotiates x16 gen5 with the nearest one, so the device's own
+  `current_link_width` says x16 and is meaningless; the binding hop is the
+  first bridge at **x4 @ 16 GT/s**. `lspci -tv` shows the chain to walk.
 - **`--tensor-split` ratio.** 96 GB vs 32 GB is roughly 3:1, so an even split
   wastes most of the NVIDIA card. Starting point is `1,3` (AMD first — that is
   the order the launcher builds `--device` in), to be tuned per model.

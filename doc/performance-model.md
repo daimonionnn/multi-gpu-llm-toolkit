@@ -143,7 +143,8 @@ you can read the exact figure out of a failed load), `-b 4096`:
 | Rig | Link | Bandwidth | Predicted ceiling | Measured |
 |---|---|---:|---:|---:|
 | `halo-win` | PCIe 4.0 x4 | ~7 GB/s | ~460 pp | **299** |
-| `dual-linux` | PCIe 5.0 x16 | ~50 GB/s | ~3300 pp | **1175** |
+| `dual-linux` (as measured) | PCIe 5.0 x8 | ~25 GB/s | ~1650 pp | **1175** |
+| `dual-linux` (after rewiring) | PCIe 5.0 x16 | ~50 GB/s | ~3300 pp | **1532** |
 
 The model is an upper bound, not a predictor — transfers overlap with compute
 and not every expert is touched in every batch. What it *does* get right is the
@@ -157,16 +158,24 @@ link actually delivered.
 | Rig | pp @16k | s per batch | Implied throughput | Utilisation of… |
 |---|---:|---:|---:|---|
 | `halo-win` | 299 | 13.7 | 4.6 GB/s | 58% of gen4 x4 |
-| `dual-linux` | 1175 | 3.5 | 18.0 GB/s | 57% of gen5 **x8** |
+| `dual-linux` (x8) | 1175 | 3.5 | 18.0 GB/s | 57% of gen5 **x8** |
 | | | | | 29% of gen5 x16 |
+| `dual-linux` (x16, after rewiring) | 1532 | 2.7 | 23.4 GB/s | 37% of gen5 x16 |
 
 Two independent rigs landing on the same 57–58% utilisation is what a
 transfer-bound layout looks like. The 29% reading would mean the link was mostly
 idle — and then cutting to four lanes could not have cost 4x, which it did. So
-this arithmetic says `dual-linux` was running its NVIDIA card at **x8**, not the
+this arithmetic said `dual-linux` was running its NVIDIA card at **x8**, not the
 x16 recorded in [systems.md](systems.md): a board that splits CPU lanes when the
 second GPU slot is populated. Useful property of a performance model — it can
 tell you your hardware inventory is wrong.
+
+**Confirmed 2026-08-17.** The AMD card was moved to a chipset slot, freeing the
+CPU lanes, and prefill rose to 1532 — a gain that is only possible if the card
+had not been at x16 to begin with. Note the last row: at x16 the layout drops to
+37% link utilisation, so it stops being transfer-bound. That is why the gain was
++30% and not the ~2x the ceiling row above would suggest, and it is the model
+telling you where it stops applying.
 
 ### Prefill when everything is already on GPUs
 
@@ -174,6 +183,14 @@ Then the link carries only activations, which are tiny by comparison: a 2048-tok
 micro-batch of a 7168-wide model is ~29 MB per crossing, about 1 GB per
 micro-batch across 18 layers — a seventh of a second even on four lanes. Prefill
 becomes GPU compute, split between the cards, and the slow card sets the pace.
+
+> **Do not read that as "link width stops mattering".** This arithmetic was used
+> to forecast that moving the AMD card to a chipset x4 slot would cost the dual
+> layout single-digit percent. Measured 2026-08-17, it cost **35–40% of
+> prefill** ([benchmarks.md](benchmarks.md), *Rewiring*). Volume is not the only
+> term: the narrow hop sits in the critical path of every micro-batch, and that
+> serialised latency is not amortised the way a bulk weight transfer is. The
+> volume argument gives a floor on the cost, not an estimate of it.
 
 ## Case studies: what each resource actually bought
 
@@ -184,7 +201,8 @@ pp/tg at 16k context.
 
 | Rig | Link | Layout | pp | tg |
 |---|---|---|---:|---:|
-| `dual-linux` | PCIe 5.0 x16 | CUDA-only, `-ncmoe 18` | **1175** | 16.4 |
+| `dual-linux` | PCIe 5.0 x16 | CUDA-only, `-ncmoe 18` | **1532** | 17.5–18.2 |
+| `dual-linux` | PCIe 5.0 x8 | CUDA-only, `-ncmoe 18` | 1175 | 16.4 |
 | `halo-win` | PCIe 4.0 x4 | CUDA-only, `-ncmoe 18` | 299 | **22.9** |
 
 Same GPU, same model, same flags. **3.9x the prefill for 8x the link**, and the
@@ -355,7 +373,8 @@ deciding what to buy, not for quoting. All assume the same workload as above: a
 | Build | Model fits? | Prefill | Generation | Binding constraint |
 |---|---|---|---|---|
 | **Strix Halo + 96 GB GPU on x4** *(measured)* | No, ~58 GB spills | 497 | 36.1 | iGPU compute, once nothing crosses the link |
-| **Intel + 96 GB GPU on x16 + 32 GB AMD** *(measured)* | No | 480–592 dual, 1175 CPU-offload | 21–25 dual, 16–17 CPU-offload | Link when offloading, AMD card when dual |
+| **Intel + 96 GB GPU + 32 GB AMD, both on CPU lanes (x8/x8)** *(measured)* | No | 947 dual, 1175 CPU-offload | 24.6 dual, 16.4 CPU-offload | Link when offloading, AMD card when dual |
+| **The same, AMD moved to chipset x4 so the GPU gets x16** *(measured)* | No | 615 dual, **1532** CPU-offload | 22.8–23.3 dual, 17.5–18.2 CPU-offload | The x4 hop when dual; no longer the link when offloading |
 | 9950X + 96 GB GPU on x16, 2 DIMMs *(est.)* | No | ~1100–1200 | ~16–19 | Dual-channel DDR5 on generation |
 | 9950X + 96 GB GPU on x16, 4 DIMMs *(est.)* | No | ~1100–1200 | ~14–17 | Memory clock forced down by DIMM count |
 | Threadripper/EPYC + 96 GB GPU *(est.)* | No | ~1200+ | ~25–35 | Nothing, until the model grows |
