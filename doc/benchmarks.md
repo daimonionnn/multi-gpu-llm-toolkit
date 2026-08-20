@@ -1516,3 +1516,63 @@ NVIDIA in a single process. It is complementary to this repo rather than a
 replacement — mainline for dual-vendor, ik for NVIDIA+RAM MoE — and it is the
 only way to run the `-R4` repacked quants (ggml type 213) that mainline
 rejects.
+
+#### Re-matched 2026-08-17: mainline wins short, ik wins deep, both by ~10%
+
+The tables above are **superseded**. They compared mainline at ~305 pp, which
+was mainline on a gen5 x8 link with `-b 2048 -ub 512`. After the rewiring, the
+batch re-tune and the thread fix, mainline runs 1200–1824 pp, and ik has since
+switched its own default away from `-rtr`. Re-matched against ik's current
+default profile (`deepseek-v4-flash-gpu-experts-128k`, its figures from that
+profile's own header, measured the same day):
+
+| Depth | ik pp | mainline pp | | ik tg | mainline tg |
+|---|---:|---:|---|---:|---:|
+| ~4k | 1329.4 | **1760.8** | mainline **+32%** | **19.98** | 18.55 |
+| ~32k | **1793.6** | 1721.3 | ik **+4.2%** | **19.14** | 17.99 |
+| ~128k | **1327.7** | 1200.7 | ik **+10.6%** | **17.20** | 16.86 |
+
+Both engines now run the *same strategy* — expert weights stream to the GPU and
+the GEMM runs there. ik reached it by dropping `-rtr`, which had been repacking
+host experts into `MXFP4_R8`, a type with no CUDA kernel, so the work had
+nowhere to go but the CPU. That is worth knowing if the two are ever compared
+by looking at CPU load: **a busy CPU was the signature of ik's slower path**,
+not its faster one, and its own numbers for that path are 437–486 pp.
+
+**Ten arms were swept trying to close the deep-context gap, and none did.**
+Measured at 32k and 128k, since the earlier sweep only went to 16k and a large
+micro-batch shows its cost there but not its benefit:
+
+| `-ncmoe` | `-b`/`-ub` | pp 32k | pp 128k | tg 128k |
+|---:|---|---:|---:|---:|
+| 16 | 8192/4096 | 1622.3 | 1103.3 | 16.33 |
+| 17 | 8192/4096 | 1637.5 | 1110.1 | 16.02 |
+| **18** | **8192/4096** | **1721.3** | **1200.7** | **16.86** |
+| 19 | 8192/8192 | 1562.3 | 1096.3 | 15.88 |
+| 20 | 16384/8192 | 1543.7 | 1053.2 | 15.07 |
+| 22 | 16384/8192 | 1440.3 | 996.0 | 13.84 |
+| 18 | 8192/2048 | 1459.0 | 1044.7 | 16.73 |
+| 18 | 4096/2048 | 1460.0 | 1045.0 | 16.54 |
+| 18 | 8192/4096 `-nkvo` | 1581.4 | 1084.4 | 10.50 |
+| 19 | 8192/8192 `-nkvo` | 1423.1 | 987.5 | 8.93 |
+
+The shipped configuration is a genuine peak: worse in **both** directions on
+`-ncmoe` and **both** directions on `-ub`. Two results are worth keeping:
+
+- **`-ncmoe` 16 and 17 are worse than 18 at depth**, though they were
+  indistinguishable at 4k/16k. Fewer host layers means more expert weight in
+  VRAM, and at 128k the KV cache wants that space.
+- **ik's own recipe transplanted wholesale makes mainline slower.** `-ub 8192`
+  costs 9% of prefill here while gaining 17% there, because ik ships weights
+  every batch and needs the amortisation; mainline's scratch is smaller and the
+  batch is not the constraint. `-nkvo` is worse still: mainline generation
+  **collapses 42%** (17.99 → 10.50 t/s) because it then reads KV over PCIe every
+  token, while ik holds 19.98 t/s with the same flag.
+
+That last line is the whole remaining gap. ik's advantage at depth is its MLA
+cache and attention implementation, not a flag mainline is missing — mainline
+has `-nkvo` and is simply much worse at using it. Nothing tunable closes it.
+
+Upstream was checked the same day: 103 commits ahead of this build's
+`77918caf3` (b10428), none touching the CUDA MoE or attention paths — Metal,
+OpenCL, SYCL, CI and new architectures. No rebuild was done for performance.
