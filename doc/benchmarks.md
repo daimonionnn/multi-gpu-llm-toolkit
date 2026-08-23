@@ -477,61 +477,81 @@ upstream's prebuilt Vulkan, both b10441. All rows `-ngl 99 -fa on -b 4096
 -ub 2048`, HTTP benchmark, 128 predicted tokens, produced by
 `benchmark-amd-dual.ps1`.
 
-### Splitting across the two AMD GPUs is broken on ROCm — silently
+### Splitting across two AMD GPUs corrupts output unless peer copies are disabled
 
-Before any speed number: **`--device ROCm1,ROCm0` loads, runs, reports plausible
-timings, and emits token soup.** Asked for the capital of France at
-temperature 0:
+**Root cause found and fixed with one build flag.** Out of the box,
+`--device ROCm1,ROCm0` loads, runs, reports plausible timings, and emits token
+soup. Asked for the capital of France at temperature 0:
 
-| Configuration | Output |
+| Build | Output |
 |---|---|
-| iGPU alone (ROCm) | `Paris` |
-| R9700 alone (ROCm) | `Paris` |
-| **both (ROCm)** | **`' 111t-telling1 but?t'`** |
-| both (Vulkan) | `Paris` |
+| default (`GGML_CUDA_NO_PEER_COPY=OFF`) | `' 111t-telling1 but?t'` |
+| **`-DGGML_CUDA_NO_PEER_COPY=ON`** | **`Paris`** |
+| either build, one device only | `Paris` |
 
-The server raises no error; the failure only surfaces downstream as
-`common_chat_peg_parse: unparsed Content-only output`. Neither
-`GGML_CUDA_NO_PEER_COPY=1` nor `GGML_CUDA_DISABLE_GRAPHS=1` changes it. The
-likely cause is in `hipInfo`, which reports `non-peers: device#0 device#1` — the
-two GPUs cannot address each other's memory.
+llama.cpp uses peer-to-peer copies when it splits a model across devices. These
+two GPUs are not peers — `hipInfo` says `non-peers: device#0 device#1` — and the
+copies **do not fail; they transfer garbage.** The server raises no error and it
+only surfaces downstream as `common_chat_peg_parse: unparsed Content-only
+output`.
 
-Consequence for this file's method, not just for this rig: a benchmark that only
-measures speed will happily record numbers for a configuration that produces
-garbage. `benchmark-amd-dual.ps1` therefore **gates every configuration on a
-factual question before timing it** and records `CORRUPT OUTPUT` instead of a
-throughput.
+The evidence is a single-variable experiment: same commit (`947fd9b`), same ROCm
+libraries, same `GGML_HIP_GRAPHS=ON`, same `gfx1151;gfx1201` target list — only
+the peer-copy flag differs between a build that answers `Paris` and one that
+does not. `build-hip-backend.ps1` therefore disables peer copies by default.
 
-**Split across these two GPUs with Vulkan, not ROCm.**
+Three hypotheses were killed by measurement before that one survived, and each
+is worth recording because each looked convincing:
+
+| Suspected | How it was ruled out |
+|---|---|
+| The hardware / non-peer topology itself | LM Studio drives both GPUs correctly on this machine |
+| A different ROCm version in LM Studio's bundle | Its `amdhip64_7.dll` and `rocblas.dll` are **byte-identical** (same MD5) to the HIP SDK 7.1 copies |
+| An old llama.cpp — ours was 9 days behind | Building LM Studio's exact commit ourselves corrupts too; so does b10603, 162 commits newer |
+
+One trap inside the investigation: `GGML_CUDA_NO_PEER_COPY` is a **compile-time
+CMake option, not an environment variable**. Setting it as an env var appears to
+work — no error, no warning — and changes nothing, which is how the correct
+hypothesis was dismissed for several hours.
+
+Consequence for method, not just for this rig: a benchmark that measures only
+speed will happily record numbers for a configuration that produces garbage.
+`benchmark-amd-dual.ps1` gates every configuration on a factual question before
+timing it, and records `CORRUPT OUTPUT` instead of a throughput.
 
 ### Qwen3.6-27B UD-Q4_K_XL (16.7 GB) — fits either GPU whole
 
 | Backend / devices | pp 4k | pp 16k | tg 4k | tg 16k |
 |---|---:|---:|---:|---:|
-| ROCm, iGPU | 335.9 | 76.9 | 11.44 | 10.97 |
-| **ROCm, R9700** | **968.9** | **863.4** | 25.96 | 25.04 |
-| ROCm, both | — | — | — | — (corrupt) |
+| ROCm, iGPU | 335.1 | 281.4 | 11.50 | 11.08 |
+| **ROCm, R9700** | **999.4** | **863.6** | 25.53 | 24.80 |
+| ROCm, both | 381.8 | 353.0 | 11.99 | 11.81 |
 | Vulkan, iGPU | 159.3 | 176.7 | 11.99 | 11.49 |
 | Vulkan, R9700 | 665.1 | 718.2 | **26.80** | **25.99** |
 | Vulkan, both | 185.5 | 208.5 | 11.53 | 11.08 |
 
-Three results worth separating:
+ROCm rows are the fixed build (`947fd9b`, peer copies off); Vulkan rows are
+upstream's prebuilt b10441.
 
-- **The discrete card wins by a wide margin** — 2.9x prefill and 2.3x generation
-  at 4k against the iGPU, and 11x prefill at 16k. Thunderbolt does not spoil it,
-  because a model that fits entirely in the card's VRAM never crosses the link
-  after loading.
-- **ROCm on the iGPU falls apart with depth for this model**: 335.9 → 76.9 pp
-  between 4k and 16k, while Vulkan on the *same device* goes 159.3 → 176.7. So
-  ROCm is twice as fast at 4k and Vulkan is 2.3x faster at 16k. The discrete card
-  shows no such effect (863 pp at 16k) — and neither does the same iGPU on
-  gpt-oss below (1194 → 990, −17%), so this is **not** a property of gfx1151 as
-  such. It is specific to this backend/model pair, and worth re-checking per
-  model rather than assumed.
-- **Splitting costs more than it gives.** Vulkan across both GPUs measures
-  185–208 pp / 11.1–11.5 tg — barely above the iGPU alone and roughly a quarter
-  of the R9700 alone. A dual layout drags throughput to the slower half, so it is
-  only worth doing when the model does not fit the fast device.
+- **The discrete card wins by a wide margin** — 3x prefill and 2.2x generation
+  against the iGPU. Thunderbolt does not spoil it, because a model that fits
+  entirely in the card's VRAM never crosses the link after loading.
+- **Splitting costs more than it gives.** Both GPUs together manage 382 pp /
+  12.0 tg — better than the iGPU alone, and a third of the R9700 alone. A dual
+  layout drags throughput toward the slower half, so it is worth doing only when
+  the model does not fit the fast device.
+- ROCm and Vulkan trade places by device: ROCm is twice as fast on the discrete
+  card's prefill, Vulkan is slightly ahead on generation and much better on the
+  iGPU at depth.
+
+An earlier revision of this file reported the iGPU collapsing from 335.9 to
+76.9 pp between 4k and 16k under ROCm and called it a property of gfx1151. It
+was **a bug in build b10441**: the same measurement on `947fd9b` gives 335.1 →
+281.4, an ordinary 16% decline. Nine days of upstream commits fixed it.
+
+**HIP graphs make no measurable difference here.** Tested on and off via
+`GGML_CUDA_DISABLE_GRAPHS`, two runs each: iGPU 11.67/11.65 against 11.60/11.64,
+both GPUs 12.25/12.25 against 12.24/12.20. Leave them at the default.
 
 Practical rule for this rig: **≤ 32 GB models go on the R9700 alone; larger ones
 go on the iGPU; split only what fits neither.**

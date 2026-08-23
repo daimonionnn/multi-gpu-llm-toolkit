@@ -18,6 +18,16 @@
 
 param(
     [string[]]$Targets,
+    # Peer-to-peer copies between GPUs. Defaults to OFF (i.e. NO_PEER_COPY=ON)
+    # because llama.cpp uses them whenever it splits a model across devices, and
+    # on GPUs that are not peers - which `hipInfo` reports as
+    # "non-peers: device#0 device#1" - the copies do not fail. They silently
+    # transfer garbage, the server answers with token soup, and the timings look
+    # normal. Verified on this machine: identical commit, identical ROCm
+    # libraries, only this flag differs between a build that answers "Paris" and
+    # one that answers "' 111t?/ 111t'". Turn it on only if your GPUs really are
+    # peers and you want the bandwidth.
+    [switch]$AllowPeerCopy,
     [string]$RepoDir,
     [string]$OutputDir,
     [string]$BuildDir = "build-hip",
@@ -48,6 +58,7 @@ if (-not $Targets) {
 $targetList = $Targets -join ';'
 Write-Host "HIP SDK:  $rocm"       -ForegroundColor Cyan
 Write-Host "Targets:  $targetList" -ForegroundColor Cyan
+Write-Host ("Peer copy: {0}" -f $(if ($AllowPeerCopy) { "enabled (risky on non-peer GPUs)" } else { "disabled" })) -ForegroundColor Cyan
 Write-Host "Output:   $OutputDir"  -ForegroundColor Cyan
 
 # ROCm's clang cannot link on its own - it needs the MSVC libraries, so import a
@@ -67,6 +78,15 @@ if (-not (Test-Path $RepoDir)) {
     git clone https://github.com/ggml-org/llama.cpp $RepoDir
 }
 
+# Two PowerShell traps in one line, both silent:
+#   -DX=$(if (...) {...})  throws "the term 'if' is not recognized"
+#   -DX=$var               passes the *literal* text $var, because a variable
+#                          after '=' in an unquoted native-command argument is
+#                          not expanded. CMake then treats the non-empty string
+#                          as true, so the build happened to be correct for the
+#                          wrong reason. Compute the value first, and quote it.
+$noPeerCopy = if ($AllowPeerCopy) { "OFF" } else { "ON" }
+
 Push-Location $RepoDir
 try {
     $buildDir = $BuildDir
@@ -77,6 +97,7 @@ try {
         -DGGML_HIP=ON -DGGML_CUDA=OFF -DGGML_VULKAN=OFF `
         -DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF `
         -DAMDGPU_TARGETS="$targetList" -DGPU_TARGETS="$targetList" `
+        -DGGML_CUDA_NO_PEER_COPY="$noPeerCopy" `
         -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF
     if ($LASTEXITCODE -ne 0) { throw "configure failed" }
 
