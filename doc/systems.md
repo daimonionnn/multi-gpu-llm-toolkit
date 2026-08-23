@@ -28,7 +28,22 @@ The practical consequence: the ROCm bugs documented for `halo-win` are APU and
 UMA bugs. On `dual-linux` there is no UMA at all, so most of them cannot occur.
 See [rocm-bugs.md](rocm-bugs.md) for the per-bug applicability matrix.
 
-## `halo-win` — AMD Strix Halo + RTX PRO 6000 over OCuLink (Windows)
+## `halo-win` — AMD Strix Halo, with whatever discrete GPU is attached (Windows)
+
+> **This rig has had three configurations in ten days.** Read the date on any
+> result before using it:
+>
+> | Until | Discrete GPU | Link | Notes |
+> |---|---|---|---|
+> | 2026-08-15 | NVIDIA RTX 5090 32 GB | internal | no results recorded |
+> | 2026-08-15 | NVIDIA RTX PRO 6000 96 GB | Thunderbolt 5, then OCuLink | the DeepSeek V4 Flash section |
+> | 2026-08-23 → | **AMD Radeon AI PRO R9700 32 GB** | Thunderbolt 5 (Minisforum DEG2) | the AMD-only section |
+>
+> The NVIDIA card left for an Intel machine; the R9700 arrived in its place, so
+> the machine is now **AMD-only, two GPUs, one of them integrated**. The CUDA
+> runtimes are still assembled and `runtime-rocm-cuda133` carries a HIP backend
+> built for both AMD architectures, so returning an NVIDIA card gives a
+> three-device machine without rebuilding anything.
 
 | Component | Details |
 |-----------|-----|
@@ -112,6 +127,47 @@ are from that window.
   the machine's ceiling. Run it with `windows/scripts/run-membw.ps1`.
 - **Port 8080 is occupied** by a service called `AgentService`. Everything here
   runs on 8090.
+
+### The AMD-only configuration (from 2026-08-23)
+
+| Component | Details |
+|-----------|-----|
+| GPU 1 | AMD Radeon 8060S iGPU — gfx1151, 40 CU, ~112 GB addressable (64 GB BIOS carve-out + ~48 GB shared) |
+| GPU 2 | AMD Radeon AI PRO R9700 (Gigabyte AI TOP) — gfx1201, 32 GB GDDR6, 256-bit, external over Thunderbolt 5 |
+| Dock | Minisforum DEG2 |
+
+Facts that shape everything measured on it:
+
+- **The device order is backend-specific and inverted.** ROCm enumerates the
+  discrete card first, Vulkan enumerates the iGPU first:
+
+  ```
+  ROCm0 = R9700     Vulkan0 = 8060S
+  ROCm1 = 8060S     Vulkan1 = R9700
+  ```
+
+  A script that hard-codes `ROCm0` as "the AMD card" silently benchmarks the
+  wrong device and nothing in its output says so. `benchmark-amd-dual.ps1`
+  matches on the device description, and `start-llama-server.ps1` now warns when
+  a mode leaves a device unused.
+- **The two GPUs are not peers.** `hipInfo` reports `non-peers: device#0
+  device#1` — neither can address the other's memory. This is the likely cause
+  of the dual-ROCm corruption below.
+- **Windows now grants the iGPU ~112 GB.** Recent AMD/Windows driver updates
+  changed the shared-memory allocation from 50% of RAM to roughly 75–80%, so
+  with a 64 GB carve-out the iGPU reaches ~112 GB in total (Vulkan reports
+  114 326 MiB). Models up to ~100 GB therefore fit the iGPU alone.
+- **Upstream's ROCm release still does not work**, and now a local build has to
+  cover *two* architectures: `build-hip-backend.ps1` reads the gfx targets from
+  `hipInfo` and builds `gfx1151;gfx1201` into one `ggml-hip.dll` (127 MB against
+  69 MB for a single arch). A device whose target is missing still enumerates
+  and fails only when a kernel launches.
+- **Measurement hygiene: let the machine settle first.** A benchmark started
+  immediately after a 60 GB download measured **17.5 pp** where the same
+  configuration measures 341 pp once Windows has flushed its page cache. On a
+  UMA machine that write traffic competes with the iGPU for the same memory
+  bus. Check `\Memory\Modified Page List Bytes` is near zero before trusting
+  a number.
 
 ### BIOS framebuffer: leave it at 1 GB
 

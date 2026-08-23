@@ -16,6 +16,11 @@ param(
     [int]$Port         = 8080,
     [string]$RuntimeDir,
 
+    # Explicit device list, bypassing the mode's own selection - e.g.
+    # "ROCm1,ROCm0,CUDA0" on a machine with two AMD GPUs and one NVIDIA. The
+    # mode still decides the runtime directory and the backend environment.
+    [string]$Devices,
+
     # Keep pinned host memory enabled for the CUDA/HIP backends. Off by
     # default, i.e. GGML_CUDA_NO_PINNED=1, which is what this project has always
     # set for those backends. Pass this when a model does not fit comfortably in
@@ -91,19 +96,21 @@ $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = "SilentlyContinue"
 $deviceText = & $serverExe --list-devices 2>&1 | Out-String
 $ErrorActionPreference = $prevEAP
-$cudaMatch     = [regex]::Match($deviceText, "(?im)\b(CUDA\d+)\b")
-$rocmMatch     = [regex]::Match($deviceText, "(?im)\b(ROCm\d+)\b")
+$cudaMatches   = [regex]::Matches($deviceText, "(?im)\b(CUDA\d+)\b")
+$rocmMatches   = [regex]::Matches($deviceText, "(?im)\b(ROCm\d+)\b")
+$cudaMatch     = if ($cudaMatches.Count) { $cudaMatches[0] } else { $null }
+$rocmMatch     = if ($rocmMatches.Count) { $rocmMatches[0] } else { $null }
 $vulkanMatches = [regex]::Matches($deviceText, "(?im)\b(Vulkan\d+)\b")
 
 $isDual = $Mode -in @("rocm-cuda", "vulkan-vulkan", "vulkan-cuda")
 
 switch ($Mode) {
     "rocm" {
-        if (-not $rocmMatch.Success) { throw "rocm mode: no ROCm device detected.`n$deviceText" }
+        if (-not $rocmMatch) { throw "rocm mode: no ROCm device detected.`n$deviceText" }
         $deviceArg = $rocmMatch.Groups[1].Value
     }
     "cuda" {
-        if (-not $cudaMatch.Success) { throw "cuda mode: no CUDA device detected.`n$deviceText" }
+        if (-not $cudaMatch) { throw "cuda mode: no CUDA device detected.`n$deviceText" }
         $deviceArg = $cudaMatch.Groups[1].Value
     }
     "vulkan" {
@@ -111,7 +118,7 @@ switch ($Mode) {
         $deviceArg = $vulkanMatches[0].Groups[1].Value
     }
     "rocm-cuda" {
-        if (-not $rocmMatch.Success -or -not $cudaMatch.Success) {
+        if (-not $rocmMatch -or -not $cudaMatch) {
             throw "rocm-cuda mode: need both ROCm and CUDA devices.`n$deviceText"
         }
         $deviceArg = "$($rocmMatch.Groups[1].Value),$($cudaMatch.Groups[1].Value)"
@@ -124,9 +131,28 @@ switch ($Mode) {
     }
     "vulkan-cuda" {
         if ($vulkanMatches.Count -eq 0) { throw "vulkan-cuda mode: no Vulkan device detected.`n$deviceText" }
-        if (-not $cudaMatch.Success)    { throw "vulkan-cuda mode: no CUDA device detected.`n$deviceText" }
+        if (-not $cudaMatch)    { throw "vulkan-cuda mode: no CUDA device detected.`n$deviceText" }
         $deviceArg = "$($vulkanMatches[0].Groups[1].Value),$($cudaMatch.Groups[1].Value)"
     }
+}
+
+# A mode picks the *first* device of each kind. That was unambiguous while this
+# machine had one GPU per vendor; with two AMD GPUs it silently uses one of them
+# and ignores the other, which looks like nothing at all in the output. Say so,
+# and let -Devices override it.
+$ignored = @()
+if ($Mode -in @("rocm", "rocm-cuda") -and $rocmMatches.Count -gt 1) {
+    $ignored += ($rocmMatches | Select-Object -Skip 1 | ForEach-Object { $_.Groups[1].Value })
+}
+if ($Mode -in @("cuda", "rocm-cuda", "vulkan-cuda") -and $cudaMatches.Count -gt 1) {
+    $ignored += ($cudaMatches | Select-Object -Skip 1 | ForEach-Object { $_.Groups[1].Value })
+}
+if ($ignored.Count -gt 0 -and -not $Devices) {
+    Write-Warning ("mode '{0}' uses {1}; also present and NOT used: {2}. Pass -Devices to choose explicitly." -f $Mode, $deviceArg, ($ignored -join ', '))
+}
+if ($Devices) {
+    Write-Host "  Devices overridden: $Devices" -ForegroundColor Yellow
+    $deviceArg = $Devices
 }
 
 # ── Build argument list ───────────────────────────────────────────────

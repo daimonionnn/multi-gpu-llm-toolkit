@@ -464,6 +464,111 @@ the ABI will not match.
   that moves weights; a gen4 or gen5 x16 slot would be the one upgrade that
   changes the shape of these results.
 
+## Results: `halo-win` — AMD-only, Strix Halo iGPU + Radeon AI PRO R9700
+
+Measured 2026-08-23/24, after the NVIDIA card left and an R9700 arrived in its
+place over a Thunderbolt 5 dock ([systems.md](systems.md)). The machine is now
+two AMD GPUs, one integrated with ~112 GB of addressable memory and one discrete
+with 32 GB of its own GDDR6. The question the rig now answers is: **what is a
+small fast discrete card worth next to a large slow integrated one?**
+
+Runtime: local HIP build covering `gfx1151;gfx1201` (`build-hip-backend.ps1`) and
+upstream's prebuilt Vulkan, both b10441. All rows `-ngl 99 -fa on -b 4096
+-ub 2048`, HTTP benchmark, 128 predicted tokens, produced by
+`benchmark-amd-dual.ps1`.
+
+### Splitting across the two AMD GPUs is broken on ROCm — silently
+
+Before any speed number: **`--device ROCm1,ROCm0` loads, runs, reports plausible
+timings, and emits token soup.** Asked for the capital of France at
+temperature 0:
+
+| Configuration | Output |
+|---|---|
+| iGPU alone (ROCm) | `Paris` |
+| R9700 alone (ROCm) | `Paris` |
+| **both (ROCm)** | **`' 111t-telling1 but?t'`** |
+| both (Vulkan) | `Paris` |
+
+The server raises no error; the failure only surfaces downstream as
+`common_chat_peg_parse: unparsed Content-only output`. Neither
+`GGML_CUDA_NO_PEER_COPY=1` nor `GGML_CUDA_DISABLE_GRAPHS=1` changes it. The
+likely cause is in `hipInfo`, which reports `non-peers: device#0 device#1` — the
+two GPUs cannot address each other's memory.
+
+Consequence for this file's method, not just for this rig: a benchmark that only
+measures speed will happily record numbers for a configuration that produces
+garbage. `benchmark-amd-dual.ps1` therefore **gates every configuration on a
+factual question before timing it** and records `CORRUPT OUTPUT` instead of a
+throughput.
+
+**Split across these two GPUs with Vulkan, not ROCm.**
+
+### Qwen3.6-27B UD-Q4_K_XL (16.7 GB) — fits either GPU whole
+
+| Backend / devices | pp 4k | pp 16k | tg 4k | tg 16k |
+|---|---:|---:|---:|---:|
+| ROCm, iGPU | 335.9 | 76.9 | 11.44 | 10.97 |
+| **ROCm, R9700** | **968.9** | **863.4** | 25.96 | 25.04 |
+| ROCm, both | — | — | — | — (corrupt) |
+| Vulkan, iGPU | 159.3 | 176.7 | 11.99 | 11.49 |
+| Vulkan, R9700 | 665.1 | 718.2 | **26.80** | **25.99** |
+| Vulkan, both | 185.5 | 208.5 | 11.53 | 11.08 |
+
+Three results worth separating:
+
+- **The discrete card wins by a wide margin** — 2.9x prefill and 2.3x generation
+  at 4k against the iGPU, and 11x prefill at 16k. Thunderbolt does not spoil it,
+  because a model that fits entirely in the card's VRAM never crosses the link
+  after loading.
+- **ROCm on the iGPU falls apart with depth for this model**: 335.9 → 76.9 pp
+  between 4k and 16k, while Vulkan on the *same device* goes 159.3 → 176.7. So
+  ROCm is twice as fast at 4k and Vulkan is 2.3x faster at 16k. The discrete card
+  shows no such effect (863 pp at 16k) — and neither does the same iGPU on
+  gpt-oss below (1194 → 990, −17%), so this is **not** a property of gfx1151 as
+  such. It is specific to this backend/model pair, and worth re-checking per
+  model rather than assumed.
+- **Splitting costs more than it gives.** Vulkan across both GPUs measures
+  185–208 pp / 11.1–11.5 tg — barely above the iGPU alone and roughly a quarter
+  of the R9700 alone. A dual layout drags throughput to the slower half, so it is
+  only worth doing when the model does not fit the fast device.
+
+Practical rule for this rig: **≤ 32 GB models go on the R9700 alone; larger ones
+go on the iGPU; split only what fits neither.**
+
+### gpt-oss-120b MXFP4 (59 GB, 128 experts / 4 active) — too big for the R9700
+
+| Backend / devices | pp 4k | pp 16k | tg 4k | tg 16k |
+|---|---:|---:|---:|---:|
+| **ROCm, iGPU** | **1193.8** | 990.3 | 42.16 | 35.59 |
+| Vulkan, iGPU | 1007.6 | 849.6 | **52.15** | **47.15** |
+| Vulkan, both | 1034.9 | **1028.6** | 50.02 | 45.35 |
+
+The two backends split the win cleanly on the same device: **ROCm prefills 18%
+faster, Vulkan generates 24–32% faster**. Which one to run therefore depends on
+the workload rather than on a general ranking — long prompts favour ROCm, chat
+favours Vulkan. That is a bigger difference than anything the second GPU
+contributes here.
+
+**The iGPU runs a 120B MoE faster than it runs a 27B dense model** — 52 t/s
+against 12 t/s, on a file three and a half times larger. Nothing about the
+hardware changed; what changed is how much of the model each token reads. With
+4 of 128 experts active, gpt-oss touches roughly 5B parameters per token, while
+the dense 27B touches all 27B. On a machine whose ceiling is memory bandwidth,
+**model shape matters more than model size** — the same conclusion `dual-linux`
+reached from the opposite direction with Step-3.7-Flash.
+
+The second card adds almost nothing even here, where the model cannot fit it:
++2.7% prefill at 4k and 4% *less* generation. Its one real contribution is depth
+resilience — 1028 pp against 850 at 16k, +21% — because the layers it holds are
+computed while the iGPU is busy with its own.
+
+For scale, the same model on `dual-linux`'s RTX PRO 6000 measured 9950 pp /
+258 t/s: about 10x the prefill and 5x the generation of this iGPU. The Strix
+Halo is not competitive with a datacentre-class card; it is competitive with
+*not being able to run the model at all*, which is what 32 GB of discrete VRAM
+offers for a 59 GB model.
+
 ## Results: `dual-linux` (Radeon AI PRO R9700 + RTX PRO 6000, Linux)
 
 **Model:** Qwen3.6-27B-uncensored-heretic-v2 i1-Q6_K (21 GB) — chosen because it
