@@ -553,8 +553,39 @@ was **a bug in build b10441**: the same measurement on `947fd9b` gives 335.1 →
 `GGML_CUDA_DISABLE_GRAPHS`, two runs each: iGPU 11.67/11.65 against 11.60/11.64,
 both GPUs 12.25/12.25 against 12.24/12.20. Leave them at the default.
 
-Practical rule for this rig: **≤ 32 GB models go on the R9700 alone; larger ones
-go on the iGPU; split only what fits neither.**
+Practical rule for this rig, in the order to check it:
+
+1. **Fits the R9700 with room for its KV cache?** Run it there alone, on ROCm.
+   Nothing else comes close — 3x the iGPU on both axes.
+2. **Slightly too big for it?** Split across both. Never put it on the R9700
+   alone and let it spill: that measures 4x *worse* than the iGPU alone.
+3. **Much too big?** The iGPU alone is usually enough; add the second card only
+   if long prompts matter, and prefer Vulkan for that (see gpt-oss below).
+4. **Choosing a model at all?** Prefer MoE. A 59 GB MoE generates four times
+   faster here than a 33 GB dense model, because what a token reads decides.
+
+### Qwen3.6-27B UD-Q8_K_XL (33.3 GB) — 1.4 GB too big for the R9700
+
+The only size in this matrix where splitting is the right answer, and the only
+one where the discrete card is a *trap*:
+
+| Backend / devices | pp 4k | pp 16k | tg 4k | tg 16k |
+|---|---:|---:|---:|---:|
+| ROCm, iGPU | 339.2 | 296.1 | 6.49 | 6.36 |
+| ROCm, R9700 alone | 78.7 | 73.1 | 6.73 | **3.47** |
+| **ROCm, both** | **377.2** | **369.7** | **7.54** | **7.38** |
+
+**Both GPUs win on both axes** — +11% prefill and +16% generation over the iGPU
+alone. This is what a dual layout is for: the model does not fit the fast card,
+so part of it lands in GDDR6 instead of shared LPDDR5X and there is no cheaper
+way to get it there.
+
+The middle row is the warning. The R9700 has 31.9 GB and the model is 33.3 GB,
+and it **loaded anyway** — llama.cpp left the remainder in host memory. Nothing
+failed, nothing warned, and prefill came out **four times worse than not using
+that card at all**, with generation at 16k collapsing to 3.47 t/s. The overflow
+streams across Thunderbolt at ~8 GB/s on every token. A model that nearly fits
+your fastest device is the worst thing to put on it alone.
 
 ### gpt-oss-120b MXFP4 (59 GB, 128 experts / 4 active) — too big for the R9700
 
