@@ -560,9 +560,26 @@ go on the iGPU; split only what fits neither.**
 
 | Backend / devices | pp 4k | pp 16k | tg 4k | tg 16k |
 |---|---:|---:|---:|---:|
-| **ROCm, iGPU** | **1193.8** | 990.3 | 42.16 | 35.59 |
+| ROCm, iGPU | 1181.5 | 979.0 | 42.41 | 35.23 |
+| **ROCm, both** | **1317.5** | 722.6 | 39.88 | 30.15 |
 | Vulkan, iGPU | 1007.6 | 849.6 | **52.15** | **47.15** |
 | Vulkan, both | 1034.9 | **1028.6** | 50.02 | 45.35 |
+
+The ROCm rows are the fixed build (peer copies off). Adding the second card buys
+**+12% prefill at 4k and loses 26% at 16k** — 1317 against 1181 shallow, 723
+against 979 deep — while generation falls throughout. That shape follows from
+the fix: without peer copies every cross-device transfer goes through host
+memory, and the volume of those transfers grows with context depth. Correctness
+was bought with bandwidth, and the price rises with the prompt.
+
+Vulkan does not pay it: its dual is flat with depth (1035 → 1029) and generates
+faster than ROCm on either layout. For this model the sensible picks are
+**Vulkan on the iGPU alone** for chat (52 tg) and **Vulkan across both** for long
+prompts (1029 pp at 16k); ROCm wins only short-context prefill.
+
+Note also that the nine days of upstream commits which took the dense model's
+16k prefill from 76.9 to 281.4 do nothing here: this MoE measures 1181/979 on
+the new build against 1193.8/990.3 on b10441, the same within noise.
 
 The two backends split the win cleanly on the same device: **ROCm prefills 18%
 faster, Vulkan generates 24–32% faster**. Which one to run therefore depends on
