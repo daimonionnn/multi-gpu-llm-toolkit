@@ -47,7 +47,7 @@ Windows-vs-Linux comparison**. Results are keyed by rig, never by OS.
 
 | Rig                        | OS      | CPU / platform               | GPU 1                                    | GPU 2                                 | Memory model                   |
 |----------------------------|---------|------------------------------|------------------------------------------|---------------------------------------|--------------------------------|
-| **halo-win**               | Windows | AMD Ryzen AI MAX+ 395        | AMD Radeon 8060S iGPU (gfx1151, UMA)     | NVIDIA RTX PRO 6000 (96 GB, **external, PCIe 4.0 x4**) | 128 GB unified, BIOS UMA split |
+| **halo-win**               | Windows | AMD Ryzen AI MAX+ 395        | AMD Radeon 8060S iGPU (gfx1151, UMA, ~112 GB) | AMD Radeon AI PRO R9700 (32 GB, gfx1201, **external over TB5**) | 128 GB unified, BIOS UMA split |
 | **dual-linux**             | Linux   | Intel Core Ultra 7 270K Plus | AMD Radeon AI PRO R9700 (gfx1201, 32 GB) | NVIDIA RTX PRO 6000 Blackwell (96 GB) | Discrete VRAM, no UMA          |
 | **halo-linux** *(planned)* | Linux   | AMD Ryzen AI MAX+ 395        | same hardware as halo-win                | same hardware as halo-win             | 128 GB unified, BIOS UMA split |
 
@@ -109,8 +109,13 @@ These apply across platforms and are the reason both live in one repo:
 - [x] Windows: DeepSeek V4 Flash MXFP4 (146 GB) served **fully GPU-resident** — experts of 18 layers on the iGPU, no CPU offload; 497 pp / 36.1 tg on `rocm-cuda`
 - [x] Windows: runtimes assembled from upstream prebuilt backend DLLs, no CUDA Toolkit needed
 - [x] Windows: BIOS framebuffer settled — smallest is best for every dual layout, including HIP
-- [ ] Windows: measure anything other than DeepSeek on the new card
-- [ ] Windows: soak the AMD expert path on the OCuLink configuration
+- [x] Windows: discrete GPU swapped again (2026-08-23) — RTX PRO 6000 out, **Radeon AI PRO R9700 in**; the rig is now AMD-only with two GPUs
+- [x] Windows: dual-architecture HIP runtime (`gfx1151;gfx1201`) built locally with `build-hip-backend.ps1`
+- [x] Windows: **splitting a model across the two AMD GPUs corrupts output on ROCm** and is silent about it — use Vulkan to split
+- [x] Windows: `benchmark-amd-dual.ps1` gates every configuration on a correctness probe before timing it
+- [x] Windows: gpt-oss-120b runs at 52 t/s on the iGPU alone — an MoE reads less per token than a 27B dense model
+- [ ] Windows: soak the AMD paths under real traffic
+- [ ] Windows: find whether the dual-ROCm corruption is the non-peer topology or a llama.cpp bug
 - [x] Linux: build and launch scripts ported to bash, detection and error paths verified on the rig
 - [x] Linux: confirmed ROCm supports the R9700 natively as `gfx1201` — no `HSA_OVERRIDE_GFX_VERSION` needed
 - [x] Linux: confirmed the APU/UMA bugs cannot occur on discrete cards (matrix in `doc/rocm-bugs.md`)
