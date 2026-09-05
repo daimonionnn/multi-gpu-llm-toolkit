@@ -1634,6 +1634,62 @@ carries the extra expert layer on AMD that the bigger KV cache pays for;
 > The `-R4` row-interleaved repack is an **ik_llama.cpp** extension. Use the
 > stepfun-ai Q4_K_S for mainline.
 
+### Qwen3.8-Flash-Next Q8_0 — the largest model here, and the fastest large one
+
+175 GiB of weights, 30 GiB more than DeepSeek V4 Flash MXFP4, and it beats it on
+both axes in the same placement. Measured 2026-09-06, CUDA-only with experts in
+system RAM, `-c 131072`:
+
+| Context | Prompt tokens | pp t/s | tg t/s | Time to first token |
+|---|---:|---:|---:|---:|
+| 4k | 3 809 | 2599.3 | 28.65 | 1.5 s |
+| 32k | 32 701 | 3003.2 | 26.32 | 10.9 s |
+| 65k | 65 255 | 2660.9 | 24.00 | 24.5 s |
+| 128k | 130 789 | **2007.9** | **21.91** | 65.1 s |
+
+Against DeepSeek MXFP4 on the same rig and placement, **+70% prefill and +32%
+generation at 128k** (2008/21.9 against 1180/16.7), from a *larger* file. The
+architecture explains it: `qwen4exp` activates 10 experts of 512, each only 640
+wide, and interleaves SSM layers that carry fixed-size state instead of a KV
+cache that grows with context. Far less of the model moves per token.
+
+Note the shape of the prefill curve — it *rises* from 4k to 32k and only then
+falls. Every other model here falls monotonically. A 4k prompt does not fill the
+8192-token batch, so the first row is measuring overhead as much as throughput.
+
+**This model needs a newer engine than everything else in this repo.** Its
+architecture landed upstream after `runtime-rocm-cuda128` was built, so that
+runtime cannot load it — it reports an unknown architecture. The profile points
+at `runtime-cuda128` instead, rebuilt from `b10428-392-g74a7c897f`.
+
+That split is deliberate and worth understanding before rebuilding anything.
+`build-cuda12-container.sh` assembles the dual runtime by copying the *local HIP
+build* and overlaying only the container-built CUDA backend. Both halves came
+from one commit while the checkout sat still; after updating the checkout and
+rebuilding, the dual runtime becomes an old `libllama.so` paired with a CUDA
+backend 392 commits newer. It was restored from a backup here rather than
+shipped in that state. **Updating the checkout means rebuilding the HIP side
+too, or the dual runtime silently mixes engine versions.**
+
+Placement was swept at 4k and 32k; lower is better all the way to the floor,
+with no knee:
+
+| `-ncmoe` | VRAM | pp 4k | pp 32k | tg 32k |
+|---:|---:|---:|---:|---:|
+| 24 | 79.3 GB | 2185.7 | 2570.0 | 21.20 |
+| 22 | 84.3 GB | 2319.8 | 2689.6 | 22.80 |
+| 20 | 89.4 GB | 2437.7 | 2848.0 | 24.45 |
+| **18** | **94.5 GB** | **2599.3** | **3003.2** | **26.32** |
+
+16 would need ~99.6 GB and does not fit. 18 leaves 3.3 GB of headroom, which
+works only because this card drives no display; put a desktop on it and 20 is
+the safe floor.
+
+`-b 8192 -ub 4096` and threads from `nproc` were carried over from the DeepSeek
+profile rather than re-swept, so they are a starting point for this
+architecture, not a measured optimum for it. Nothing here has been soaked, and
+the vision projector that ships with the model is unused.
+
 ### ik_llama.cpp evaluated for the RAM-offload case
 
 `ik_llama.cpp` (fork at `bd342d6`, "DS4 optimizations") is built around exactly

@@ -72,6 +72,7 @@ LLM_MODELS_DIR=/mnt/models ./start-deepseek-mxfp4-nvidia-amd-cpu.sh
 | `start-deepseek-iq3xxs-nvidia-amd.sh` | DeepSeek V4 Flash IQ3_XXS all-VRAM across both cards — fastest DeepSeek generation measured (57 t/s) but **crashes**: HIP i-quant fault within 43k–225k prefill tokens | — |
 | `start-step37-q4ks-nvidia-amd.sh`           | Step-3.7-Flash Q4_K_S — 104 GB across both cards' VRAM, the true dual-GPU case | — |
 | `start-gptoss-mxfp4-nvidia.sh`           | gpt-oss-120b MXFP4, CUDA-only — fastest model on the rig (258 t/s) | — |
+| `start-qwen38-flash-next-q8-nvidia-cpu.sh` | Qwen3.8-Flash-Next Q8_0, 175 GB — CUDA-only + RAM, 128k. Needs `runtime-cuda128`, not the dual runtime | — |
 | `build-cuda12-container.sh` | CUDA backend built with CUDA 12.8 in Docker; merges into a dual runtime | — |
 
 Backend modes match Windows — with `.so` backends in place of `.dll`, plus one
