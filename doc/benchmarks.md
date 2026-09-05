@@ -1687,8 +1687,19 @@ the safe floor.
 
 `-b 8192 -ub 4096` and threads from `nproc` were carried over from the DeepSeek
 profile rather than re-swept, so they are a starting point for this
-architecture, not a measured optimum for it. Nothing here has been soaked, and
-the vision projector that ships with the model is unused.
+architecture, not a measured optimum for it. Nothing here has been soaked.
+
+**Vision is on by default.** The model ships a `qwen3vl_merger` projector beside
+the weights, and the profile loads it unless `--no-vision` is passed. It costs
+~1.1 GB: 95.6 GB resident against 94.5 GB text-only, rising to 95.8 GB while
+encoding a 1024x1024 image. Verified on a synthetic image with known contents —
+shapes, positions, colours and embedded text all read back correctly, in Slovak,
+without the prompt naming any of them. A 1024x1024 photo costs ~1090 prompt
+tokens.
+
+That leaves ~2.1 GB of headroom at `-ncmoe 18`, which held for the image sizes
+tried but has not been pushed. `-ncmoe 20` is the setting to use if images are
+the main workload, or if anything else shares the card.
 
 ### ik_llama.cpp evaluated for the RAM-offload case
 
