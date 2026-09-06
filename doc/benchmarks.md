@@ -1625,23 +1625,6 @@ more than model size. Second, this is the first configuration in the project
 where the AMD card is **load-bearing rather than optional** — remove it and
 the model does not run at this speed at all.
 
-> **Re-measured 2026-09-06 on Thunderbolt, and it costs ~30%.** The R9700 moved
-> from OCuLink to a TB5 enclosure whose PCIe tunnel trains at Gen2 x4
-> (1.41 GiB/s measured, against OCuLink's `x4 @ 16 GT/s`). Same profile,
-> `--64k`, NVIDIA 86.1 GB and AMD 24.3 GiB as before:
->
-> | Depth | pp OCuLink | pp TB5 | | tg OCuLink | tg TB5 | |
-> |---|---:|---:|---|---:|---:|---|
-> | 4k | 2194 | 1506 | −31% | 89.2 | 62.4 | −30% |
-> | 16k | 2441 | 1685 | −31% | 85.1 | 61.8 | −27% |
-> | 61–64k | 2108 | 1577 | −25% | 78.0 | 57.0 | −27% |
->
-> It degrades gracefully, which is the point: this layout is **all-VRAM**, so
-> only activations cross the link, not weights. The same card on the same link
-> cost Qwen3.8-Flash-Next 79–85% of prefill, because that layout streams expert
-> weights. Two variables moved here though — the engine is also 392 commits
-> newer — so the 30% is not attributable to the link alone.
-
 Profile: `start-step37-q4ks-nvidia-amd.sh`. 128k is the default and already
 carries the extra expert layer on AMD that the bigger KV cache pays for;
 `--64k` is the smaller-window variant.
