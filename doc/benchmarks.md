@@ -1625,6 +1625,23 @@ more than model size. Second, this is the first configuration in the project
 where the AMD card is **load-bearing rather than optional** — remove it and
 the model does not run at this speed at all.
 
+> **Re-measured 2026-09-06 on Thunderbolt, and it costs ~30%.** The R9700 moved
+> from OCuLink to a TB5 enclosure whose PCIe tunnel trains at Gen2 x4
+> (1.41 GiB/s measured, against OCuLink's `x4 @ 16 GT/s`). Same profile,
+> `--64k`, NVIDIA 86.1 GB and AMD 24.3 GiB as before:
+>
+> | Depth | pp OCuLink | pp TB5 | | tg OCuLink | tg TB5 | |
+> |---|---:|---:|---|---:|---:|---|
+> | 4k | 2194 | 1506 | −31% | 89.2 | 62.4 | −30% |
+> | 16k | 2441 | 1685 | −31% | 85.1 | 61.8 | −27% |
+> | 61–64k | 2108 | 1577 | −25% | 78.0 | 57.0 | −27% |
+>
+> It degrades gracefully, which is the point: this layout is **all-VRAM**, so
+> only activations cross the link, not weights. The same card on the same link
+> cost Qwen3.8-Flash-Next 79–85% of prefill, because that layout streams expert
+> weights. Two variables moved here though — the engine is also 392 commits
+> newer — so the 30% is not attributable to the link alone.
+
 Profile: `start-step37-q4ks-nvidia-amd.sh`. 128k is the default and already
 carries the extra expert layer on AMD that the bigger KV cache pays for;
 `--64k` is the smaller-window variant.
@@ -1688,6 +1705,43 @@ the safe floor.
 `-b 8192 -ub 4096` and threads from `nproc` were carried over from the DeepSeek
 profile rather than re-swept, so they are a starting point for this
 architecture, not a measured optimum for it. Nothing here has been soaked.
+
+#### Q4_K_M against Q8_0: 1.2-1.6x prefill, but **2.5-3.9x generation**
+
+The same model at 111.0 GiB instead of 175.3, measured 2026-09-06 on the same
+card with the same harness:
+
+| Context | pp Q8 | pp Q4 | | tg Q8 | tg Q4 | |
+|---|---:|---:|---|---:|---:|---|
+| 4k | 2599 | **4029** | +55% | 28.6 | **111.9** | **+290%** |
+| 32k | 3003 | **4332** | +44% | 26.3 | **79.1** | +201% |
+| 65k | 2661 | **3577** | +34% | 24.0 | **70.7** | +195% |
+| 128k | 2008 | **2451** | +22% | 21.9 | **54.5** | +149% |
+
+Time to first token on a full window falls 65.1 s → **53.4 s**; at 4k it is
+0.9 s against 1.5.
+
+**This is a placement result, not a quantisation one.** Q4 crosses the
+threshold where the model stops needing system RAM at all. The placement sweep
+is monotonic to zero and the last step is where it pays:
+
+| `-ncmoe` | VRAM | host RAM | pp 4k | pp 32k | tg 32k |
+|---:|---:|---:|---:|---:|---:|
+| 12 | 73.3 GB | 33 GiB | 3323 | 3799 | 36.71 |
+| 8 | 79.7 GB | 26 GiB | 3584 | 4027 | 42.44 |
+| 4 | 86.1 GB | 20 GiB | 3796 | 4174 | 52.47 |
+| **0** | **92.9 GB** | **13 GiB** | **4081** | **4331** | **78.27** |
+
+`--n-cpu-moe 0` — no expert offload whatever. Q8 has ~80 GiB of experts
+streaming from DDR5 on every token and cannot avoid it; Q4 fits, and the 3x
+generation gap is that difference and almost nothing else. Note also that Q4's
+128k generation (54.5 t/s) beats ik_llama's Q8 at the same depth (31.3), which
+no amount of engine tuning closed.
+
+What this does **not** measure is quality. The speed here is exact; the cost in
+output quality was not quantified, and on a 512-expert MoE the sensitive
+tensors are routing and attention rather than bulk expert weight. Treat the
+choice as a measured speed gain against an unmeasured quality loss.
 
 #### Against ik_llama on the same model: we prefill, they generate
 
