@@ -1689,6 +1689,53 @@ the safe floor.
 profile rather than re-swept, so they are a starting point for this
 architecture, not a measured optimum for it. Nothing here has been soaked.
 
+#### Against ik_llama on the same model: we prefill, they generate
+
+`ik-llama-toolkit` ships a profile for this exact file
+(`qwen38-flash-next-q8-128k`), so both engines were run on the same weights on
+the same box. **Its stored figures are not comparable to ours and were not
+used:** `llama-sweep-bench` reports the *instantaneous* rate of processing a
+chunk once N_KV tokens are already cached, while this repo's harness reports the
+*average* over prefilling a whole prompt from empty. The average is necessarily
+the higher number, and quoting one against the other would have flattered this
+repo by a wide margin.
+
+So its server was started (`IK_GDB=0`, since its own config warns the gdb wrapper
+can move benchmarks) and measured with *this* repo's harness instead:
+
+| Context | pp ours | pp ik | | tg ours | tg ik | |
+|---|---:|---:|---|---:|---:|---|
+| 4k | **2599.3** | 1654.6 | +57% | 28.65 | **37.70** | +32% |
+| 32k | **3003.2** | 1663.0 | +81% | 26.32 | **35.64** | +35% |
+| 65k | **2660.9** | 1535.8 | +73% | 24.00 | — | |
+| 128k | **2007.9** | 1300.3 | +54% | 21.91 | — | |
+
+The two deep `tg` cells are missing because ik's server returned a single token
+there where ours returned the full 256 on the same prompt. A direct probe with
+`ignore_eos` at 126 890 tokens, identical request to both, closes that gap and
+is the cleanest single comparison in this file:
+
+| At 126 890 tokens | ours | ik |
+|---|---:|---:|
+| prefill | **1752.9** | 1210.7 |
+| generation | 22.05 | **31.31** |
+
+**Prefill ours by 45–81%, generation theirs by 32–42%**, and both follow from
+the same constraint. ik cannot run a micro-batch this large: its own config
+records `-ncmoe 17` as the floor at `-ub 2048`, with 16 leaving under 1 GiB
+after the compute buffer and 13 dying on the KV allocation. This repo runs
+`-ub 4096` at `-ncmoe 18` in the same 96 GB, because mainline's attention
+scratch is smaller — the same engine difference its DeepSeek profile identified
+from the other side. Generation runs the other way: ik ships `-fmoe` and
+`-ooae`, which transfers only the experts a token actually activated, and with
+10 live experts of 512 that is precisely the access pattern this model makes.
+
+Neither is a general verdict. Prompt-heavy work wants this repo, chat and agent
+loops that generate more than they read want ik, and the crossover is somewhere
+around a 1:15 generate-to-prefill ratio on these numbers. ik also runs its KV
+cache at `q8_0` here against our `f16`, which is part of how it affords its
+placement and is not free on quality.
+
 **Vision is on by default.** The model ships a `qwen3vl_merger` projector beside
 the weights, and the profile loads it unless `--no-vision` is passed. It costs
 ~1.1 GB: 95.6 GB resident against 94.5 GB text-only, rising to 95.8 GB while
