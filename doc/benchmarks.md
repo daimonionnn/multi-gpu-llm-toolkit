@@ -1730,11 +1730,36 @@ from the other side. Generation runs the other way: ik ships `-fmoe` and
 `-ooae`, which transfers only the experts a token actually activated, and with
 10 live experts of 512 that is precisely the access pattern this model makes.
 
-Neither is a general verdict. Prompt-heavy work wants this repo, chat and agent
-loops that generate more than they read want ik, and the crossover is somewhere
-around a 1:15 generate-to-prefill ratio on these numbers. ik also runs its KV
-cache at `q8_0` here against our `f16`, which is part of how it affords its
-placement and is not free on quality.
+Neither is a general verdict, and the naive reading of it is wrong. On raw
+throughput the crossover is at a prefill-to-generate ratio of **~40:1** (37 at
+32k, 50 at 128k) — this repo has to prefill forty tokens for every one generated
+before its advantage covers ik's.
+
+**Prompt caching decides it, and it is worth more than either engine
+difference.** Measured on a stable 55k prefix: a cold turn prefills 54 890
+tokens in 23.8 s, while the next turn on the same prefix prefills **26 tokens in
+0.4 s**. Warm, prefill is 7% of the turn and generation is everything.
+
+So the answer for an agent depends on how much it generates and how often the
+cache survives. Turn cost at ~55–65k depth, and the share of cache misses at
+which this repo overtakes ik:
+
+| Tokens generated per turn | warm: ours / ik | cold: ours / ik | break-even miss rate |
+|---:|---|---|---:|
+| 120 (tool call) | 5.0 / **3.6** s | **25.7** / 39.4 s | **9%** |
+| 300 | 12.5 / **9.0** s | **33.2** / 44.8 s | **23%** |
+| 800 (with reasoning) | 33.3 / **23.9** s | 54.0 / **59.7** s | 62% |
+| 2000 | 83.3 / **59.7** s | 104.0 / **95.5** s | never |
+
+A tool-calling agent with short replies needs only 9% of its turns to miss the
+cache before this repo wins, which is easy to reach — summarisation, branching,
+context edits and restarts all invalidate it. A *reasoning* agent is the
+opposite, and this model is one: it emits a `<think>` block for even trivial
+questions, which puts real turns at 800+ tokens and hands the workload to ik
+unless the cache is missing most of the time.
+
+ik also runs its KV cache at `q8_0` here against our `f16`, which is part of how
+it affords its placement and is not free on quality.
 
 **Vision is on by default.** The model ships a `qwen3vl_merger` projector beside
 the weights, and the profile loads it unless `--no-vision` is passed. It costs
