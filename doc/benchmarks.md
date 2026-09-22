@@ -567,6 +567,11 @@ Practical rule for this rig, in the order to check it:
    alone and let it spill: that measures 4x *worse* than the iGPU alone.
 3. **Much too big?** The iGPU alone is usually enough; add the second card only
    if long prompts matter, and prefer Vulkan for that (see gpt-oss below).
+   **The exception is a model that keeps tensors in host memory.** Then the
+   iGPU's own overflow and those tensors read from the same LPDDR5X bus on
+   every token, and splitting buys generation in multiples rather than
+   percents - 4.4x for Qwen3.8-Flash-Next below, which fits the iGPU whole and
+   is still four times faster split.
 4. **Choosing a model at all?** Prefer MoE. A 59 GB MoE generates four times
    faster here than a 33 GB dense model, because what a token reads decides.
 
@@ -642,6 +647,161 @@ For scale, the same model on `dual-linux`'s RTX PRO 6000 measured 9950 pp /
 Halo is not competitive with a datacentre-class card; it is competitive with
 *not being able to run the model at all*, which is what 32 GB of discrete VRAM
 offers for a 59 GB model.
+
+### Qwen3.8-Flash-Next Q4_K_M (111 GiB, 512 experts / 10 active) — splitting for bandwidth, not capacity
+
+Measured 2026-09-21. The widest dual-versus-single gap on this rig, and the one
+case here where **the model fits the iGPU whole and should still be split**:
+
+Every run that completed is listed. The dual layout only loads about a third of
+the time on this dock, so repeats are the point rather than a formality - see
+[the stability table](#the-dual-layout-is-not-stable-on-this-dock-and-the-link-rate-is-not-the-variable)
+below.
+
+| Backend / devices | pp 4k | pp 16k | tg 4k | tg 16k |
+|---|---:|---:|---:|---:|
+| ROCm, iGPU, run 1 | 389.5 | 371.5 | 5.86 | 5.63 |
+| ROCm, iGPU, run 2 | 401.1 | 378.8 | 5.74 | 5.46 |
+| **ROCm, both (`-ts 2,1`)**, A | **540.2** | **576.0** | 25.77 | 20.94 |
+| **ROCm, both (`-ts 2,1`)**, B | **551.5** | *364.0* | 25.54 | 21.39 |
+| **ROCm, both (`-ts 2,1`)**, C | **538.8** | **563.9** | 23.84 | 21.88 |
+| **ROCm, both (`-ts 2,1`)**, D | **558.5** | **563.0** | 21.53 | 20.14 |
+
+**Prefill is the tight measurement.** 4k spans 538.8-558.5 across four dual
+runs, a 3.7% spread. 16k lands at 576.0, 563.9 and 563.0 - a 2.3% spread - with
+a single run at 364.0. That one row is an outlier and is italicised as one: it
+is 36% below three runs that agree with each other, and it happens to be the
+only run measured on the *full-rate* link, which is the wrong direction for a
+bandwidth explanation.
+
+**Prefill rises with depth**, +6.6%, +4.7% and +0.8% in runs A, C and D, against
+the outlier's -34%. Nothing else in this file does that. The 4k prompt is
+3 948 tokens and does not fill the batch, so the shallow number carries
+proportionally more fixed overhead - the same shape the Q8_0 rows on
+`dual-linux` show from 4k to 32k.
+
+**Generation is the loose one**, and the opposite of what two runs suggested
+before C and D existed: 4k spans 21.53-25.77, a 19.7% spread, and 16k spans
+20.14-21.88, 8.6%. Quote it as a range. Against the iGPU it is still **3.7x to
+4.4x**, which is the finding that survives every run.
+
+**Capacity is not why.** 33.12 GiB of this model never reaches a GPU at all:
+`per_layer_token_embd.weight` is 32.78 GiB of **F32** — Q4_K_M leaves it
+unquantized — and it shares a host buffer with `token_embd.weight`. That leaves
+77.8 GiB for the GPUs, which the iGPU can hold by itself. It just should not:
+past the BIOS carve-out the iGPU's overflow lives in GTT, so those weights and
+the host-resident embeddings then contend for one LPDDR5X bus, per token.
+Moving a third of the weights into the R9700's GDDR6 splits that traffic across
+two memory systems, and generation is where it shows.
+
+The same file on `dual-linux` measures 4029 pp / 111.9 tg at 4k
+([below](#q4_k_m-against-q8_0-12-16x-prefill-but-25-39x-generation)) — 7x and
+4x this — on a card that holds the whole thing in its own VRAM. The comparison
+prices the memory system, not the backend.
+
+#### Three walls before it loads at all
+
+**The engine.** The architecture is `qwen4exp`, which no runtime in this repo
+knew: b10603, the newest here, reports an unknown architecture, and upstream's
+ROCm zip still enumerates no device against HIP SDK 7.1. This needs a local HIP
+build at **b11065 or newer** (`build-hip-backend.ps1`).
+
+**The Windows commit limit.** HIP charges GPU allocations against it — the iGPU
+carve-out and the R9700's own VRAM included. Sampling `GlobalMemoryStatusEx`
+through a load shows available commit falling 104.4 → 74.0 → 25.5 GiB as the
+two device buffers are reserved, after which the 33.12 GiB host buffer cannot
+be served and the load dies:
+
+```
+failed to allocate ROCm_Host buffer of size 35557749760
+```
+
+**Physical RAM is never the constraint** — it sat at 48 GiB free throughout. No
+tensor split avoids this, because moving weights between devices does not
+change the total: ~136 GiB of commit against a 127.6 GiB limit. The fix is the
+pagefile, and it must be a **fixed** one: `InitialSize = MaximumSize = 96 GiB`.
+A 64/128 GiB lazily-grown pagefile does not expand fast enough to serve a
+single 33 GiB request, which is why the stock setting fails while nominally
+allowing 128.
+
+**Vulkan cannot run this model on this rig at all.** The R9700 exposes three
+heaps, and the device-local + host-visible one is **256 MiB** — small BAR,
+because OCuLink needs Resizable BAR off to enumerate here at all. The Vulkan
+backend asks that heap for a ~955 MiB buffer and fails, at every split tried
+and in both device orders:
+
+```
+ggml_vulkan: Device memory allocation of size 1001222016 failed
+ggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory
+```
+
+#### A dock fault that reads as a llama.cpp bug
+
+Before the Thunderbolt dock was power-cycled, every dual attempt died ~30 s
+into the weight upload with
+
+```
+ROCm error: unspecified launch failure
+  current device: -1, in function ggml_backend_cuda_buffer_set_tensor
+```
+
+identically at `-ts 1.5,1` and `2,1`, while the iGPU alone was fine. Nothing in
+software changed between that and the numbers above — only the dock. **Re-seat
+the dock before debugging a cross-device launch failure**; allocation errors
+name the device that ran out, this one does not.
+
+#### The dual layout is not stable on this dock, and the link rate is not the variable
+
+**Twelve dual loads were attempted; eight failed**, every one with the launch
+failure above, at 22-27 s into the weight upload. Link state and drivers were
+varied between them, and neither sorts the outcomes:
+
+| Condition | dual loads that succeeded |
+|---|---|
+| 2.5 Gb/s, after a dock re-seat | 1 of 3 |
+| full rate | 1 of 3 |
+| 2.5 GT/s, after a dock restart | 0 of 3 |
+| 2.5 GT/s, after a driver reinstall | **2 of 3** |
+
+The obvious theory - that the dock could not hold the high rate and fell over -
+predicts that the slow, renegotiated link should be the reliable one. On its
+own it was the worst of the four conditions. Whatever this is, it is not the
+link running too fast.
+
+The driver reinstall gave the best rate observed, and it **reinstalled the same
+version** (32.0.31041.1004) rather than upgrading, so if it helped it did so by
+repairing an installation rather than by changing any code. Three attempts
+cannot separate that from luck.
+
+**The rest of the machine is fine.** `-Configs igpu` never failed, and it
+reproduces: two runs a session apart gave 389.5 / 5.86 and 401.1 / 5.74 at 4k,
+371.5 / 5.63 and 378.8 / 5.46 at 16k - inside 3% on every figure. Same runtime,
+same model, same pagefile, same `-fit off`. The only difference is whether a
+tensor crosses the dock. Device enumeration and `hipInfo` topology look
+identical before a success and before a failure, so there is no pre-flight
+check that predicts it.
+
+The hardware is a Minisforum DEG2 dock on a Minisforum MS-S1 Max with that
+dock's own cable, so the usual suspect - a marginal third-party cable - is
+already excluded. Dock and Thunderbolt-controller firmware are the layer
+between the driver and the cable that has not been changed.
+
+Treat every dual figure here as provisional in the sense that the layout is
+unreliable, not that the numbers are: four completed runs agree to 3.7% on 4k
+prefill and 2.3% on 16k prefill once the single outlier is set aside.
+
+#### Caveats
+
+The link was reported at 2.5 Gb/s for runs A, C and D and at full rate for B,
+and was not verified under load in any of them - the rate comes from the
+desktop, not from sampling during a transfer. B is both the full-rate run and
+the outlier, which is the wrong way round for a bandwidth explanation and is
+why the dock is suspected rather than the link width.
+
+`-b`/`-ub` were left at llama.cpp's defaults rather than swept, unlike every
+other row in this section, so the prefill figures are a floor for this layout.
+Nothing here has been soaked, and `-ts` was swept only far enough to find a
+value that loads: 1.5,1 and 2,1 both work, 2,1 is what was measured.
 
 ## Results: `dual-linux` (Radeon AI PRO R9700 + RTX PRO 6000, Linux)
 

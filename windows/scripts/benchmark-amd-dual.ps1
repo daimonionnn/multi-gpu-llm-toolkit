@@ -18,7 +18,9 @@
 #   .\benchmark-amd-dual.ps1 -Model ... -TensorSplit 1,3        # dual only
 #
 # Each config is a full load/measure/unload cycle, so a large model takes a few
-# minutes per row. Results are appended to the CSV and printed as one table.
+# minutes per row. Results are printed as one table and written to the CSV,
+# which is **overwritten** each run - a second run with -Configs dual loses the
+# rows a first run with -Configs igpu wrote. Pass -OutCsv to keep them apart.
 
 [CmdletBinding(PositionalBinding = $false)]
 param(
@@ -32,6 +34,11 @@ param(
     [string]$ProbePrompt = "Question: What is the capital city of France? Answer with the city name only.`nAnswer:",
     [string]$ProbeExpect = 'Paris',
     [int]$PredictTokens = 128,
+    # Token budget for the correctness probe. A reasoning model spends its first
+    # tokens inside a <think> block and has not reached the answer by token 12,
+    # which the gate then records as CORRUPT OUTPUT. Raise it for those models;
+    # the think block is stripped before matching either way.
+    [int]$ProbeTokens = 12,
     [int]$Port = 8090,
     [int]$LoadTimeoutSec = 900,
     [string]$OutCsv,
@@ -116,14 +123,19 @@ foreach ($cfg in $Configs) {
     # the ROCm backend loads, runs, reports plausible timings - and emits token
     # soup. A benchmark that only measures speed records those numbers as if they
     # meant something, so every config has to answer one factual question first.
-    $probeBody = @{ prompt = $ProbePrompt; n_predict = 12; temperature = 0; cache_prompt = $false } | ConvertTo-Json -Compress
+    $probeBody = @{ prompt = $ProbePrompt; n_predict = $ProbeTokens; temperature = 0; cache_prompt = $false } | ConvertTo-Json -Compress
     $probeOut = ''
     try {
         $probeOut = (Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$Port/completion" `
                         -ContentType 'application/json' -Body $probeBody -TimeoutSec 600).content
     } catch { $probeOut = "<request failed: $($_.Exception.Message)>" }
 
-    if ($probeOut -notmatch [regex]::Escape($ProbeExpect)) {
+    # Strip the reasoning block before matching, including an unterminated one:
+    # a model still thinking when the budget ran out has no </think> at all.
+    $probeAnswer = $probeOut -replace '(?s)<think>.*?</think>', ''
+    $probeAnswer = $probeAnswer -replace '(?s)<think>.*$', ''
+
+    if ($probeAnswer -notmatch [regex]::Escape($ProbeExpect)) {
         $short = ($probeOut -replace '\s+', ' ').Trim()
         if ($short.Length -gt 60) { $short = $short.Substring(0, 60) + '...' }
         Write-Warning "$cfg produces WRONG OUTPUT - not timing it. Expected '$ProbeExpect', got: $short"

@@ -15,6 +15,7 @@ BIOS UMA split, no WDDM. See [systems.md](systems.md) for both rigs.
 | **1. `isLargeBar` cap**          | ROCm hardcodes it off for APUs   | Affected — needs binary patch | Not applicable                  | Discrete cards report large-BAR normally     |
 | **2. KV cache spill**            | WDDM + starved GART at 96 GB UMA | Affected at 96 GB UMA         | Not applicable                  | No shared memory pool to spill into          |
 | **3. `hipMallocManaged` broken** | gfx1151-specific                 | Affected                      | Untested — verify on gfx1201    | Different silicon; may or may not carry over |
+| **4. Commit-limit accounting**   | Windows charges HIP allocations against the commit limit | Affected — a large model needs a large *fixed* pagefile | Not applicable                  | Linux has no commit charge for device memory |
 
 Bug 3 is the only one worth re-testing on `dual-linux`.
 
@@ -69,6 +70,60 @@ There are **two independent bugs** that affect HIP memory on Strix Halo. They ha
 | **Bug 2** (KV spill)   | Memory placement speed | Historically: 96 GB UMA + low OS RAM | Reduce BIOS UMA to 64 GB      |
 
 Historically, at 96 GB UMA, both bugs compounded: Bug 1 capped allocations at ~64 GiB (fixable with patch), but even after fixing Bug 1, Bug 2 still sent KV cache to shared memory (slow). On the current stack, 96 GB UMA is no longer an automatic startup failure on this machine, but 64 GB UMA remains the safer baseline until the performance characteristics are re-benchmarked.
+
+## Not a bug, but it fails like one: HIP allocations charge the Windows commit limit
+
+**What it does**: Windows counts HIP device allocations against the system
+**commit limit** — physical RAM plus pagefile — and it counts all of them: the
+iGPU's BIOS carve-out and a discrete card's own VRAM alike. A model whose
+buffers plus host-resident tensors exceed that limit fails to load even though
+physical RAM is nowhere near full.
+
+**What it does NOT do**: it does not page anything to disk. The pagefile here is
+accounting backing, not traffic. Measured through a failing load of
+Qwen3.8-Flash-Next Q4_K_M on `halo-win`, free physical RAM never moved off
+48 GiB while available commit collapsed:
+
+| | available commit |
+|---|---:|
+| idle | 104.4 GiB |
+| after the first device buffer | 74.0 GiB |
+| after the second | 25.5 GiB |
+| request that then failed | 33.1 GiB |
+
+The failure names a host buffer, which sends you looking at RAM:
+
+```
+ggml_backend_cpu_buffer_type_alloc_buffer: failed to allocate buffer of size 35557749760
+alloc_tensor_range: failed to allocate ROCm_Host buffer of size 35557749760
+```
+
+**No tensor split avoids it.** Moving weights between the iGPU, the discrete
+card and the host changes which allocation fails, never the total charged. On
+that model it was ~136 GiB of commit against a 127.6 GiB limit, and `-ts`
+values from `1.2,1` to `6,1` all failed.
+
+**Fix**: size the pagefile so RAM + pagefile clears the model's total, and make
+it **fixed** — `InitialSize = MaximumSize`:
+
+```powershell
+# elevated; 98304 MiB = 96 GiB. Reboot to take effect.
+$pf = Get-CimInstance Win32_PageFileSetting -Filter "Name='c:\\pagefile.sys'"
+Set-CimInstance -InputObject $pf -Property @{ InitialSize = 98304; MaximumSize = 98304 }
+```
+
+A lazily-grown pagefile is the trap: `halo-win` shipped at 64 GiB initial with a
+128 GiB maximum, and still failed, because Windows will not expand the file fast
+enough to serve one 33 GiB request. The nominal maximum is not the limit you
+get. Check what you actually have with
+
+```powershell
+(Get-CimInstance Win32_OperatingSystem).TotalVirtualMemorySize / 1MB   # GiB
+```
+
+**Diagnosing it**: sample `GlobalMemoryStatusEx` during the load. If
+`ullAvailPhys` holds steady while `ullAvailPageFile` falls to near the size of
+the allocation that fails, this is what you are looking at, not Bug 1 or Bug 2.
 
 ---
 
