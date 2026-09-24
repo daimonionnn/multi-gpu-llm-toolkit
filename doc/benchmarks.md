@@ -13,6 +13,98 @@ cross-rig table as "two different machines", never as "Windows vs Linux".
 Always record alongside a result: rig, backend mode, model and quant, context
 size, `--tensor-split`, and any relevant BIOS/driver setting.
 
+## Start here
+
+This file is a lab notebook, not a spec sheet. Every section records what was
+measured, on which rig, and what it changed — which makes it long. Two ways in:
+
+- **Looking for a number?** [Results at a glance](#results-at-a-glance) gives the
+  winning configuration for every model measured, with a link to the section
+  that derived it.
+- **Looking for a rule?** [What the results add up to](#what-the-results-add-up-to)
+  collects the four conclusions that survived across both rigs.
+
+Everything else is the evidence behind those two, in the order it was measured.
+
+### Results at a glance
+
+Best configuration per model, at 4k context, with the numbers that layout
+produced:
+
+| Rig | GPUs | Model (size) | Winning layout | pp t/s | tg t/s |
+|---|---|---|---|---:|---:|
+| `halo-win` | 8060S iGPU + RTX PRO 6000, OCuLink x4 | [DeepSeek V4 Flash MXFP4 (145.6 GB)](#results-halo-win--deepseek-v4-flash-mxfp4-strix-halo-igpu--rtx-pro-6000-windows) | `rocm-cuda`, 18 expert layers on iGPU | 481 | 35.9 |
+| `halo-win` | 8060S iGPU + R9700, Thunderbolt 5 | [Qwen3.6-27B Q4_K_XL (16.7 GB)](#qwen36-27b-ud-q4_k_xl-167-gb--fits-either-gpu-whole) | R9700 alone, ROCm | 999 | 25.5 |
+| `halo-win` | 8060S iGPU + R9700, Thunderbolt 5 | [Qwen3.6-27B Q8_K_XL (33.3 GB)](#qwen36-27b-ud-q8_k_xl-333-gb--14-gb-too-big-for-the-r9700) | both GPUs, ROCm | 377 | 7.5 |
+| `halo-win` | 8060S iGPU + R9700, Thunderbolt 5 | [gpt-oss-120b MXFP4 (59 GB)](#gpt-oss-120b-mxfp4-59-gb-128-experts--4-active--too-big-for-the-r9700) | iGPU alone, Vulkan — both at depth | 1008 | 52.2 |
+| `halo-win` | 8060S iGPU + R9700, Thunderbolt 5 | [Qwen3.8-Flash-Next Q4_K_M (111 GiB)](#qwen38-flash-next-q4_k_m-111-gib-512-experts--10-active--splitting-for-bandwidth-not-capacity) | both GPUs, ROCm, `-ts 2,1` | 539–559 | 21.5–25.8 |
+| `dual-linux` | R9700 + RTX PRO 6000 | [Qwen3.6-27B Q6_K (21 GB)](#results-dual-linux-radeon-ai-pro-r9700--rtx-pro-6000-linux) | RTX PRO 6000 alone, CUDA | 2233\* | 61.2\* |
+| `dual-linux` | R9700 + RTX PRO 6000 | [DeepSeek V4 Flash IQ3_XXS (98 GB)](#results-dual-linux--deepseek-v4-flash-the-model-dual-gpu-exists-for) | `rocm-cuda` dual — CUDA-only prefills better past 16k | 1106 | 45.3 |
+| `dual-linux` | RTX PRO 6000 alone | [DeepSeek UD-IQ2_M (85 GB)](#deepseek-all-vram-2-bit-quants--the-single-card-speed-class) | all-VRAM, CUDA | 2118 | 76.1 |
+| `dual-linux` | RTX PRO 6000 alone | [gpt-oss-120b MXFP4 (60 GB)](#gpt-oss-120b--the-fastest-model-on-this-rig) | all-VRAM, CUDA | 9950 | 258 |
+| `dual-linux` | R9700 + RTX PRO 6000 | [Step-3.7-Flash Q4_K_S (104 GB)](#step-37-flash--the-model-dual-gpu-actually-exists-for) | dual, experts of 10 layers on R9700 | 2194 | 89.2 |
+| `dual-linux` | RTX PRO 6000 alone | [Qwen3.8-Flash-Next Q4_K_M (111 GiB)](#q4_k_m-against-q8_0-12-16x-prefill-but-25-39x-generation) | all-VRAM, CUDA, no expert offload | 4029 | 111.9 |
+| `dual-linux` | RTX PRO 6000 + system RAM | [Qwen3.8-Flash-Next Q8_0 (175 GiB)](#qwen38-flash-next-q8_0--the-largest-model-here-and-the-fastest-large-one) | CUDA-only, experts in RAM | 2599 | 28.7 |
+
+\* `llama-bench` pp512/tg128; every other row is HTTP at 4k context.
+
+The GPU column is the hardware **as it was when that row was measured** — both
+rigs have changed cards, so the rig name alone does not identify it. `halo-win`
+swapped its discrete card on 2026-08-23 (RTX PRO 6000 out, R9700 in), and its
+link is named because on that machine the link decides the result. `dual-linux`
+kept its cards but was [rewired on 2026-08-17](#rewiring-the-amd-card-off-the-cpu-slot-2026-08-17),
+which moved the NVIDIA card from gen5 x8 to a genuine x16 and the AMD card onto
+chipset lanes, so no single link width describes all of its rows. The two rigs
+are not comparable hardware — see [systems.md](systems.md).
+
+### What the results add up to
+
+1. **Fit decides the layout, not device count.** A model that fits one fast
+   device runs fastest on that device *alone*; splitting drags throughput toward
+   the slower half. This holds on both rigs — 3x on `halo-win`, and the dual
+   reaching only 73% of single-card prefill on `dual-linux`.
+2. **Except when something spills to host memory.** Then both halves contend for
+   one bus, and splitting buys generation in multiples rather than percents —
+   4.4x for Qwen3.8-Flash-Next, a model that *fits the iGPU whole* and is still
+   four times faster split.
+3. **Model shape beats model size.** What a token reads decides. A 59 GB MoE
+   generates four times faster on the iGPU than a 33 GB dense model, and a
+   104 GB MoE on `dual-linux` beats an 80 GB one.
+4. **The worst thing a model can do is nearly fit.** One 1.4 GB too big for the
+   R9700 loaded anyway, silently, and prefilled four times *worse* than not
+   using that card at all.
+
+### Contents
+
+**Method**
+- [Understanding the metrics](#understanding-the-metrics) — what `GenTokPerSec` and `TotalTokPerSec` each measure
+- [Benchmarking tools](#benchmarking-tools) — `run-llama-bench` (hardware ceiling) against `benchmark-loaded-model` (end-to-end HTTP)
+- [What Thunderbolt 5 costs against OCuLink](#what-thunderbolt-5-costs-against-oculink) — same model, same lanes, only the link changed: 3% when nothing streams, 13% when weights do
+
+**`halo-win` — Strix Halo iGPU + RTX PRO 6000, Windows** ([section](#results-halo-win--deepseek-v4-flash-mxfp4-strix-halo-igpu--rtx-pro-6000-windows))
+- [Final configuration](#final-configuration-oculink-1-gb-framebuffer) and [how it got there](#how-it-got-there) — thirteen layouts
+- [The link decides everything — width, not tunnel](#the-link-decides-everything--and-it-is-the-width-not-the-tunnel), and [why the CPU is not the alternative](#but-the-cpu-is-not-the-alternative-avx-512-or-not)
+- [Only experts may leave the NVIDIA card](#only-experts-may-leave-the-nvidia-card) · [framebuffer size is backend-dependent](#framebuffer-backend-dependent-not-universally-better) · [`rocm-cuda` wins both axes](#rocm-cuda-wins-on-both-axes)
+- [Prompt structure as a prefill lever](#the-prefill-lever-that-is-not-a-flag-prompt-structure) · [assembling runtimes without a compiler](#assembling-runtimes-without-a-compiler)
+
+**`halo-win` — AMD-only, iGPU + Radeon AI PRO R9700** ([section](#results-halo-win--amd-only-strix-halo-igpu--radeon-ai-pro-r9700))
+- [Splitting across two AMD GPUs corrupts output unless peer copies are disabled](#splitting-across-two-amd-gpus-corrupts-output-unless-peer-copies-are-disabled) — read this before anything else in the section
+- Four models by size: [16.7 GB](#qwen36-27b-ud-q4_k_xl-167-gb--fits-either-gpu-whole) · [33.3 GB](#qwen36-27b-ud-q8_k_xl-333-gb--14-gb-too-big-for-the-r9700) · [59 GB](#gpt-oss-120b-mxfp4-59-gb-128-experts--4-active--too-big-for-the-r9700) · [111 GiB](#qwen38-flash-next-q4_k_m-111-gib-512-experts--10-active--splitting-for-bandwidth-not-capacity)
+- [Three walls before the 111 GiB model loads](#three-walls-before-it-loads-at-all) — the engine, the Windows commit limit, small-BAR Vulkan
+- [The dual layout is not stable on this dock](#the-dual-layout-is-not-stable-on-this-dock-and-the-link-rate-is-not-the-variable) — 8 of 12 loads fail, and the link rate is not the variable
+
+**`dual-linux` — R9700 + RTX PRO 6000, Linux** ([backend matrix](#results-dual-linux-radeon-ai-pro-r9700--rtx-pro-6000-linux))
+- [What this says](#what-this-says) — Vulkan beats ROCm on the R9700, which inverts the `halo-win` assumption
+- [Context-depth sweep](#context-depth-sweep) · [the definitive CUDA 12.8 matrix](#the-definitive-matrix-cuda-backend-built-with-cuda-128) · [the CUDA backend cannot run `-fa off`](#bug-the-cuda-backend-cannot-run-with-flash-attention-disabled)
+
+**`dual-linux` — DeepSeek V4 Flash, and everything measured after it** ([section](#results-dual-linux--deepseek-v4-flash-the-model-dual-gpu-exists-for))
+- [Full 256k on two paths](#full-256k-verified-on-two-paths) · [every dual layout is broken for this model](#stability-every-dual-layout-is-currently-broken-for-this-model) · [fault isolated to i-quants](#quantization-comparison--and-the-fault-isolated-to-i-quants)
+- [`-ub` is the prefill lever: +60% for one flag](#-ub-is-the-prefill-lever-60-for-one-flag)
+- [Rewiring the AMD card off the CPU slot](#rewiring-the-amd-card-off-the-cpu-slot-2026-08-17) — and what followed: [the GPU binds prefill, not the link](#what-binds-prefill-now-the-gpu-not-the-link), [re-tuned](#re-tuned-on-the-wider-link-81924096-11-prefill), [power and clocks](#power-limit-and-memory-clock-35-and-23), [threads](#threads-re-measured-65-generation-and-why-prefill-only-burns-one-core), [the resulting config](#the-resulting-configuration-4k-to-128k)
+- [RAM swap: 4 DIMMs @ 6267 → 2 @ 7400](#ram-swap-4-dimms--6267---2-dimms--7400-mts) · [the RAM-offload cliff](#the-ram-offload-cliff-why-3-bit-deepseek-is-not-worth-it-here)
+- Model results: [2-bit DeepSeek](#deepseek-all-vram-2-bit-quants--the-single-card-speed-class) · [gpt-oss-120b](#gpt-oss-120b--the-fastest-model-on-this-rig) · [Step-3.7-Flash](#step-37-flash--the-model-dual-gpu-actually-exists-for) · [Qwen3.8-Flash-Next Q8_0](#qwen38-flash-next-q8_0--the-largest-model-here-and-the-fastest-large-one) and [Q4_K_M against it](#q4_k_m-against-q8_0-12-16x-prefill-but-25-39x-generation)
+- [ik_llama.cpp evaluated](#ik_llamacpp-evaluated-for-the-ram-offload-case) and [re-matched](#re-matched-2026-08-17-mainline-wins-short-ik-wins-deep-both-by-10)
+
 ## Understanding the metrics
 
 When looking at results (especially inside `benchmark.log`), you will see the following key metrics:
@@ -40,6 +132,78 @@ Uses the internal `llama-bench` tool. Best for measuring absolute maximum hardwa
 Tests the true end-to-end experience of a client interacting with `llama-server` over the REST API. It accounts for web-server threading, connection handling, HTTP overhead, and the continuous KV-cache context switching that happens when multiple real clients hit the server simultaneously (`--parallel X`).
 
 * **Usage:** Start your model server, then run the script. It will automatically detect the running `llama-server` to extract the mode and extra args, and log the results into `benchmark.log`.
+
+---
+
+## What Thunderbolt 5 costs against OCuLink
+
+Both external links on `halo-win` are four lanes wide and both deliver ~8 GB/s,
+so this is a clean question: with the lane count held constant, what does the
+Thunderbolt tunnel cost? It was measured on 2026-08-15, when the RTX PRO 6000
+ran the same DeepSeek V4 Flash MXFP4 over TB5 in the morning and over OCuLink
+the same afternoon. Two pairs in [How it got there](#how-it-got-there) differ
+in nothing but the link:
+
+| Pair | Layout | What crosses the link | pp cost of TB5 | tg cost of TB5 |
+|---|---|---|---:|---:|
+| rows 3 → 9 | `vulkan-cuda`, 18 expert layers on iGPU | activations only | **2.7–3.3%** | 1.4–5.6% |
+| rows 1 → 10 | CUDA-only, `--n-cpu-moe 18` | expert weights, every micro-batch | **7.9–12.8%** | 1.0–2.2% |
+
+Raw figures, at 4k / 16k / 32k:
+
+| Row | Link | pp | tg |
+|---|---|---|---|
+| 3 | TB5 | 328.9 / 342.6 / 340.1 | 33.16 / 33.86 / 33.46 |
+| 9 | OCuLink | 338.8 / 352.1 / 351.6 | 35.14 / 34.35 / 34.94 |
+| 1 | TB5 | 245.5 / 260.7 / 262.3 | 22.95 / 22.70 / 22.43 |
+| 10 | OCuLink | 266.4 / 299.1 / 296.1 | 23.29 / 22.93 / 22.93 |
+
+Rows 3 and 9 are the cleaner pair: both are dual layouts, which need pinned host
+memory, so both had it. In rows 1 and 10 the **TB5 run was pinned and the
+OCuLink run was not** ([why](#trap-pinned-host-memory-has-to-be-decided-per-layout)),
+which handicaps OCuLink — so 7.9–12.8% is a floor for that layout, not a
+measurement of the link alone.
+
+**The spread between the two pairs is the whole answer: TB5 costs what you send
+across it.** Keep the weights on the devices and the tunnel is worth ~3%. Stream
+expert weights through it on every micro-batch and it is worth ~13%. Generation
+barely moves either way, because generation is bound by expert-read bandwidth on
+whichever device holds the weights, not by the link.
+
+**What the tunnel is not, is the reason this rig prefills slowly.** The same
+CUDA-only layout measures 1175 pp on `dual-linux` against 262 here — four times
+more — and swapping TB5 for native OCuLink buys back a tenth of that gap, not a
+quarter. **Four lanes against sixteen** is the constraint, and no cabling change
+addresses it. See [The link decides everything](#the-link-decides-everything--and-it-is-the-width-not-the-tunnel).
+
+### Caveats, and one measurement that was withdrawn
+
+**The TB5 link rate was never sampled during those runs.** That it was training
+at full rate is inferred from the results rather than measured: a tunnel falling
+back to Gen1 or Gen2 would not land within 3% of OCuLink. Reasonable, but
+inference.
+
+**A second comparison was deleted rather than corrected.** Step-3.7-Flash Q4_K_S
+on `dual-linux` measured −25 to −31% on both axes moving from OCuLink to a TB5
+enclosure (2026-09-06). It was withdrawn in `e1b63e0` because that enclosure was
+not negotiating USB4 v2 at all — it trained **Gen2 x4, 1.41 GiB/s measured** —
+so the numbers describe a misconfigured link, not Thunderbolt 5. The engine had
+also moved 392 commits between the two halves. Recover them with
+`git show e1b63e0 -- doc/benchmarks.md` if useful; do not quote them as a TB5
+result.
+
+That withdrawn run is still worth repeating on a link that trains properly,
+because of the contrast it showed: the all-VRAM Step-3.7 layout lost 25–31% on a
+narrow link where Qwen3.8-Flash-Next lost 79–85%, one streaming expert weights
+and the other not. That is the same mechanism the two pairs above show, at ten
+times the amplitude.
+
+**Throughput is not the only cost.** On the AMD side of this rig the Thunderbolt
+dock is also where the dual layout fails to load at all — 8 of 12 attempts, see
+[The dual layout is not stable on this dock](#the-dual-layout-is-not-stable-on-this-dock-and-the-link-rate-is-not-the-variable).
+A 3% throughput difference is the cheap part of choosing the tunnel; whether the
+layout loads is the expensive one, and [doc/oculink-amd-dgpu.md](oculink-amd-dgpu.md)
+is why OCuLink is not available as the alternative for AMD cards here.
 
 ---
 
