@@ -52,13 +52,39 @@ Here it does not appear at all. So there is AMD-specific discrete-GPU machinery 
 these firmwares — consistent with everything below — and on other boards it
 mishandles the card's power budget, while on this one it never publishes the port.
 
-That sharpens the comparison worth making. **FEVM ships Strix Halo with OCuLink
-from the factory** — the FAEX1 (1-litre chassis, OCuLink 64 Gbps, the earlier of
-the two) and the FA-EX9 (OCuLink plus an adapter in the box); the M1A Pro+ reaches
-it through an internal M.2 adapter. Any of those BIOS images would be the third
-diff, and a far better control than Framework: same silicon, same reference code,
-and OCuLink as a shipped feature. No public download was found for either FEVM
-model.
+That sharpens the comparison worth making. Several vendors ship Strix Halo with
+OCuLink from the factory: the **GMKtec EVO-X3** (Ryzen AI Max+ 395, OCuLink as
+PCIe **Gen4 x4** — the same silicon and the same link width as this rig, but as a
+shipped feature rather than an adapter in an x4 slot), and FEVM's **FAEX1**
+(1-litre, OCuLink 64 Gbps) and **FA-EX9**; the M1A Pro+ reaches it through an
+internal M.2 adapter. Any of those BIOS images would be a better control than
+Framework. None is publicly downloadable — the EVO-X3 runs AMI `EVO-X3_V1.01`
+(17 June 2026) and GMKtec publishes no BIOS for it yet.
+
+### The one measurement anyone with such a machine can supply
+
+The image is not actually needed, and a live read is **better** than one: the open
+question is what `0x05` and `0x35` hold *at runtime* on a machine where an AMD card
+over OCuLink works. That is 30 seconds of someone else's time.
+
+On Linux the variable is a file. The first four bytes are EFI attributes, so
+varstore offset `N` sits at file offset `N+4`:
+
+```bash
+V=/sys/firmware/efi/efivars/AMD_PBS_SETUP-a339d746-f678-49b3-9fc7-54ce0f9df226
+sudo xxd -s $((4+0x05)) -l 1 "$V"   # Primary Video Adaptor   1=IGD  2=PEG
+sudo xxd -s $((4+0x35)) -l 1 "$V"   # Non-Eval Discrete GPU    0=off  1=on
+sudo xxd -l 64 "$V"                 # or just dump the head
+```
+
+On Windows, read it with `GetFirmwareEnvironmentVariableW` on `AMD_PBS_SETUP` /
+`{A339D746-F678-49B3-9FC7-54CE0F9DF226}`, elevated, after enabling privilege 22 —
+the same method used on this rig, described under
+[Reproducing the analysis](#reproducing-the-analysis).
+
+Four values decide it. If a working OCuLink machine reads `0x05 = 1 (IGD)` where
+this one reads `2 (PEG)`, the hypothesis holds. If both read the same, it is dead
+and the cause is somewhere this investigation has not looked.
 
 ## The symptom
 
