@@ -36,6 +36,21 @@ NVIDIA cards work on the identical path. An RTX 5090 and an RTX PRO 6000 both
 enumerated over OCuLink on this machine; the R9700 does not. That asymmetry is
 the thread this whole investigation pulls on.
 
+**It is not specific to this machine.** The community Strix Halo wiki's
+[external-GPU guide](https://strixhalo.wiki/Guides/External_GPU) records the same
+split across the platform — AMD discrete cards have documented problems while
+"**no problems were reported with NVIDIA GPUs**". It documents no working AMD
+OCuLink configuration and names no BIOS setting that fixes one, so as far as the
+community record goes this is a Strix Halo pattern with Framework as the only
+counter-example. It also notes a separate AMD-specific quirk worth knowing: the
+external card's power limit gets tied to the APU's.
+
+That raises an obvious next comparison that has **not** been done: the FEVM
+FA-EX9 is Strix Halo with OCuLink on the board and an OCuLink adapter in the box,
+so its BIOS would be the third image to diff — same silicon, same AMD reference
+code, OCuLink as a shipped feature rather than an adapter hack. No public BIOS
+download for it was found.
+
 ## The symptom
 
 With the R9700 attached over OCuLink (RIITOP PCIe-to-OCuLink adapter, Minisforum
