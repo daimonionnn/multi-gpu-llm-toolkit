@@ -1,12 +1,15 @@
-# AMD dGPUs do not enumerate over OCuLink on the MS-S1 Max
+# The R9700 does not enumerate over OCuLink on this MS-S1 Max
 
 A firmware investigation on **`halo-win`**, traced from "the card is not in Device
 Manager" down to one byte in one UEFI variable — and then to the discovery that
 the byte cannot be written from any channel a user has.
 
-**Status: diagnosed, not fixed.** The suspected setting could never be changed,
-so the diagnosis is well-supported but **unverified**. Only Minisforum can close
-this one.
+**Status: diagnosed, not fixed, and not the whole story.** The suspected setting
+could never be changed, so the diagnosis is well-supported but **unverified** —
+only Minisforum can close that part. Since it was written, one owner has reported
+an R9700 working over OCuLink on an MS-S1 Max with a *DEG1* dock, which the
+theory here does not predict; see [What other machines show](#what-other-machines-show)
+for what that does and does not overturn.
 
 ## Why this is in a multi-GPU repo
 
@@ -16,6 +19,13 @@ unreliable: eight of twelve dual-GPU loads fail with `unspecified launch failure
 OCuLink is a direct PCIe connection with none of that tunnelling, so moving the
 R9700 onto it would likely make the dual layout reliable. It does not work, and
 this file is why.
+
+**The reason to want it is not throughput.** Measured on this rig with the same
+lane count, the tunnel costs 3% of prefill when only activations cross it and
+~13% when expert weights do
+([what Thunderbolt 5 costs](benchmarks.md#what-thunderbolt-5-costs-against-oculink)).
+What OCuLink would buy is a layout that loads every time and a card that idles
+down — see the last paragraph of [What other machines show](#what-other-machines-show).
 
 NVIDIA cards work on the identical path. An RTX 5090 and an RTX PRO 6000 both
 enumerated over OCuLink on this machine; the R9700 does not. That asymmetry is
@@ -74,9 +84,82 @@ The surrounding PBS options confirm the shape of it: `EVAL Slot Power Enable`,
 `Discrete GPU's SSID/SVID`, `D3Cold Force Gen1`. This is laptop hybrid-graphics
 machinery, and a retail card on a dock is not what it was written for.
 
-Framework Desktop, the same Ryzen AI Max+ 395 silicon, enumerates the same
-R9700 with a 32 GiB prefetchable BAR0. Whatever the exact mechanism, the limit
-is not in the CPU.
+## What other machines show
+
+Two reports from the [r/LocalLLaMA thread](https://www.reddit.com/r/LocalLLaMA/comments/1wi87ac/mss1_max_radeon_ai_pro_r9700_over_oculink_no/)
+bear directly on the theory above. One supports it, one does not fit it.
+
+### Framework Desktop enumerates an R9700 — with two caveats
+
+A Framework Desktop owner posted the allocation itself rather than a report of
+it working:
+
+```
+c3:00.0 VGA compatible controller: [AMD/ATI] Navi 48 [Radeon AI PRO R9700] (rev c0)
+Subsystem: Framework Computer Inc. Device 000a
+Region 0: Memory at 2800000000 (64-bit, prefetchable) [size=32G]
+Region 2: Memory at 3000000000 (64-bit, prefetchable) [size=256M]
+Kernel driver in use: amdgpu
+```
+
+A 32 GiB prefetchable BAR0 allocated and `amdgpu` bound, on the same Ryzen AI
+Max+ 395 silicon. **The limit is not in the CPU** — that is what this capture
+settles, and it is the strongest evidence against a silicon explanation.
+
+Two things it does not settle, both worth stating before leaning on it:
+
+- **`Subsystem: Framework Computer Inc. Device 000a`** is a Framework-branded
+  R9700, not a retail card. PBS carries a `Discrete GPU's SSID/SVID` option, so
+  a firmware path keyed on subsystem ID is not excluded. What was demonstrated
+  is that *their* card works, which is weaker than that any R9700 does.
+- **The topology is not matched.** The reported tree is
+  `00:02.5-[c1-c3]----00.0-[c2]----00.0-[c3]--+-00.0 Navi 48` — two bridges
+  between root port and GPU, on root port `02.5`. `halo-win` reaches its x4 slot
+  through `00:03.1` with no intermediate bridge. Same silicon, same class of
+  card, different path.
+
+### One MS-S1 Max is reported working, and the theory does not predict it
+
+Another owner in that thread runs an R9700 over OCuLink on an MS-S1 Max, through
+a **DEG1** dock and the same RIITOP adapter used here. It took three things:
+
+- the link would not train at Gen4, so **Gen3 had to be forced in BIOS** before
+  the card appeared in `lspci` at all
+- **`amdgpu.runpm=0`**, because the card could not power back up from idle over
+  OCuLink
+- **three DIP switches** under a panel on the underside of the DEG1, all moved
+  off their factory positions
+
+This matters more than anything else on this page: the EVAL-pin theory predicts
+that no retail AMD card can work here, and one does. Three differences keep the
+theory alive rather than refuting it, and none of them is comfortable.
+
+1. **The failure modes are not the same.** That machine's root port was present
+   and failing to train. Here, and for the thread's author, the root port is
+   **gone** — `00:03.1` absent from the tree entirely. A port that trains badly
+   and a port that was never published are different faults.
+2. **Gen3 does not help here.** Forced Gen3 and Gen4 were both tested on
+   `halo-win`; neither changes anything. The thread's author also tried the DEG1
+   switches, with no effect.
+3. **DEG1 against DEG2.** This rig uses a DEG2, the newer dock, which also
+   carries a USB4/Thunderbolt path the DEG1 does not. Whether that changes how it
+   routes OCuLink is untested, and it is the most interesting variable left. The
+   DIP switches are part of the same question: nothing equivalent has been located
+   on the DEG2.
+
+So "AMD dGPUs do not enumerate over OCuLink on this platform" is too strong as a
+general claim. It holds on this rig and on at least one other machine, and fails
+on at least one machine with a different dock. What none of that changes is the
+argument for the default: **it should not require forcing Gen3 and moving
+undocumented DIP switches** to use a supported card on a supported port.
+
+One detail in that working report lines up with something measured here. That
+card could not return from idle over OCuLink — and on `halo-win` the R9700 over
+Thunderbolt draws **40–50 W doing nothing**, against **under 10 W for the whole
+dock including the GPU** when the same card and the same DEG2 run over OCuLink
+on an Intel desktop. No driver version or Windows power setting reached it. The
+same power-state machinery appears to be implicated in both, on a path where the
+GPU never enters its low-power state.
 
 ## Every write channel is blocked
 
@@ -192,6 +275,22 @@ What Minisforum would need to do, in order of preference:
 4. Update AMD PI from 1002B patchC (their 1.09 release notes) to 1.0.0.2c, the
    level Framework Desktop ships.
 
+> **Request 4 is the weak one, and it should be made honestly.** 1.0.0.2c is
+> traceable: Framework Desktop BIOS 3.04 moved AMD PI to 1.0.0.2, and 3.06
+> (stable, 2026-07-28) to 1.0.0.2c. But that changelog has ten items and **none
+> of them mentions discrete GPUs, PCIe enumeration or graphics**, beyond a boot
+> hang with "specific video encoder cards" and an iGPU memory cap. No Framework
+> release note claims a dGPU fix, so pairing the version with the working
+> enumeration is correlation, not a documented cause. `1002B patchC` may also
+> parse as 1.0.0.2B patch C rather than something strictly older than 1.0.0.2C,
+> which invites the reply "we already ship that".
+>
+> The claim that does not depend on any of this: **the same option is exposed to
+> end users on other AMD platforms.** The ASUS ROG STRIX X670E BIOS manual
+> documents `AMD PBS → Graphics Features → Non-Eval Discrete GPU Support
+> [Disabled] / [Enabled]` with the identical EVAL-pin help string. It is a
+> normal, shippable, user-facing PBS item — which is what request 2 asks for.
+
 Tracking threads:
 [r/MINISFORUM](https://www.reddit.com/r/MINISFORUM/comments/1wm94cz/mss1_max_doesnt_work_with_amd_gpus_radeon_ai_pro/),
 [r/LocalLLaMA](https://www.reddit.com/r/LocalLLaMA/comments/1wi87ac/mss1_max_radeon_ai_pro_r9700_over_oculink_no/).
@@ -209,7 +308,10 @@ Each of these was tested and is not the cause:
   Enabled.
 - **`Above 4GB MMIO Limit`**, which reads `40bit (1TB)` — MMIO space is not the
   constraint.
-- **Link speed forced to Gen3**, and Gen4.
+- **Link speed forced to Gen3**, and Gen4. Gen3 is what made the difference on
+  the one MS-S1 Max reported working; here it changes nothing.
+- **A BIOS predating 1.11.** Another owner points at 1.05 for a PCIe enumeration
+  fix; this rig is on 1.11, which postdates it.
 - **Cables, adapters, docks, PSU wiring, and OS** — covered across the two
   Reddit threads with three adapters, two docks, two Linux distributions and
   Windows. The machine here uses Minisforum's own DEG2 dock and cable, so a

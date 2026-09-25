@@ -82,7 +82,7 @@ These apply across platforms and are the reason both live in one repo:
 - **[doc/rocm-bugs.md](doc/rocm-bugs.md)** — ROCm/HIP memory bugs, with a per-bug matrix of which hardware and OS each one affects
 - **[doc/cuda-glibc-243.md](doc/cuda-glibc-243.md)** — why the distro CUDA 13.1 cannot build on Ubuntu 26.04, and how to fix it
 - **[doc/cuda-fa-blackwell.md](doc/cuda-fa-blackwell.md)** — CUDA token generation collapses at 8192 context on Blackwell: cause, measurements, and a one-line fix
-- **[doc/oculink-amd-dgpu.md](doc/oculink-amd-dgpu.md)** — why AMD discrete GPUs do not enumerate over OCuLink on the MS-S1 Max, traced to one BIOS option that cannot be written from any channel a user has
+- **[doc/oculink-amd-dgpu.md](doc/oculink-amd-dgpu.md)** — why the R9700 does not enumerate over OCuLink on this MS-S1 Max, traced to one BIOS option that cannot be written from any channel a user has, and the one report that does not fit that theory
 
 ## Repository layout
 
@@ -117,7 +117,7 @@ These apply across platforms and are the reason both live in one repo:
 - [x] Windows: `benchmark-amd-dual.ps1` gates every configuration on a correctness probe before timing it
 - [x] Windows: gpt-oss-120b runs at 52 t/s on the iGPU alone — an MoE reads less per token than a 27B dense model
 - [x] Windows: Qwen3.8-Flash-Next Q4_K_M (111 GiB, `qwen4exp`) served across both AMD GPUs — ~540-560 pp and 21.5-25.8 tg at 4k over four runs, **3.7-4.4x the iGPU alone even though it fits the iGPU whole**; the split buys memory bandwidth, not capacity
-- [x] Windows: AMD dGPUs over OCuLink traced to `Non-Eval Discrete GPU Support` being disabled in BIOS — the option is reachable but **no channel can write `AMD_PBS_SETUP`**, so the fix is unverified and needs Minisforum ([doc/oculink-amd-dgpu.md](doc/oculink-amd-dgpu.md))
+- [x] Windows: AMD dGPUs over OCuLink traced to `Non-Eval Discrete GPU Support` being disabled in BIOS — the option is reachable but **no channel can write `AMD_PBS_SETUP`**, so the fix is unverified and needs Minisforum. A Framework Desktop `lspci` shows the same card enumerating on the same silicon; one MS-S1 Max on a *DEG1* is reported working after forcing Gen3, which the theory does not predict ([doc/oculink-amd-dgpu.md](doc/oculink-amd-dgpu.md))
 - [ ] Windows: stabilise the Thunderbolt dock — **eight of twelve** dual loads fail with `unspecified launch failure` at 22-27 s. Renegotiating the link *down* made it worse (0 of 3), so the link rate is not the variable; a driver reinstall of the *same* version gave the best rate seen (2 of 3). `-Configs igpu` never fails and reproduces inside 3%
 - [x] Windows: HIP charges GPU allocations against the **Windows commit limit** — a model this size needs a large *fixed* pagefile; a lazily-grown one fails while nominally large enough
 - [x] Windows: the R9700's 256 MiB small-BAR heap makes the Vulkan backend unusable for that model, at every tensor split
