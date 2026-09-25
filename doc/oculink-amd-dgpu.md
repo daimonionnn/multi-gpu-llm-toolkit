@@ -4,12 +4,14 @@ A firmware investigation on **`halo-win`**, traced from "the card is not in Devi
 Manager" down to one byte in one UEFI variable — and then to the discovery that
 the byte cannot be written from any channel a user has.
 
-**Status: diagnosed, not fixed, and not the whole story.** The suspected setting
-could never be changed, so the diagnosis is well-supported but **unverified** —
-only Minisforum can close that part. Since it was written, one owner has reported
-an R9700 working over OCuLink on an MS-S1 Max with a *DEG1* dock, which the
-theory here does not predict; see [What other machines show](#what-other-machines-show)
-for what that does and does not overturn.
+**Status: the leading theory did not survive.** Framework Desktop's public BIOS
+was extracted and it ships `Non-Eval Discrete GPU Support` **disabled at the same
+offset**, while AMD dGPUs enumerate there — so that byte is not what separates
+the two machines. See [Framework ships the same default](#framework-ships-the-same-default-which-breaks-the-theory).
+The symptom, the evidence and the write-protection findings below all stand; the
+explanation does not. Two better candidates and the one measurement that would
+settle it are named in that section. One owner also reports an R9700 working over
+OCuLink on an MS-S1 Max with a *DEG1* dock ([what other machines show](#what-other-machines-show)).
 
 ## Why this is in a multi-GPU repo
 
@@ -55,6 +57,13 @@ deliberately disabled and hid it during POST. That is also why `pci=realloc` and
 a PCI rescan do nothing — there is no bridge left for the OS to work with.
 
 ## The finding
+
+> **Superseded as an explanation.** This was the leading theory and it does not
+> survive the [Framework comparison](#framework-ships-the-same-default-which-breaks-the-theory):
+> that machine ships the same byte disabled at the same offset and enumerates AMD
+> cards anyway. The option, the help string and the surrounding PBS machinery are
+> all real and remain the best map of where to look, which is why this stays. It
+> is the conclusion that was wrong, not the observation.
 
 BIOS SHWSA 1.11 contains an AMD PBS (Platform BIOS Setup) option that the retail
 setup UI does not expose:
@@ -108,7 +117,7 @@ between them is this machine's firmware.
 (The under-10 W idle figure quoted at the end of this section is from that
 machine.)
 
-### Framework Desktop enumerates an R9700 — with two caveats
+### Framework Desktop enumerates an R9700 — and it is a retail card
 
 A Framework Desktop owner posted the allocation itself rather than a report of
 it working:
@@ -125,12 +134,14 @@ A 32 GiB prefetchable BAR0 allocated and `amdgpu` bound, on the same Ryzen AI
 Max+ 395 silicon. **The limit is not in the CPU** — that is what this capture
 settles, and it is the strongest evidence against a silicon explanation.
 
-Two things it does not settle, both worth stating before leaning on it:
+One caveat stands and one was withdrawn:
 
-- **`Subsystem: Framework Computer Inc. Device 000a`** is a Framework-branded
-  R9700, not a retail card. PBS carries a `Discrete GPU's SSID/SVID` option, so
-  a firmware path keyed on subsystem ID is not excluded. What was demonstrated
-  is that *their* card works, which is weaker than that any R9700 does.
+- ~~**`Subsystem: Framework Computer Inc. Device 000a`** means a Framework-branded
+  card rather than a retail one.~~ **Withdrawn.** Their BIOS sets
+  `Discrete GPU's SSID/SVID = Program by Vendor` with a vendor value at `0x7F`,
+  so the firmware *rewrites* the subsystem ID of whatever discrete card is
+  attached. The capture is a retail R9700 relabelled by Framework's firmware,
+  which makes it a better comparison than it first appeared.
 - **The topology is not matched.** The reported tree is
   `00:02.5-[c1-c3]----00.0-[c2]----00.0-[c3]--+-00.0 Navi 48` — two bridges
   between root port and GPU, on root port `02.5`. `halo-win` reaches its x4 slot
@@ -179,6 +190,90 @@ dock including the GPU** when the same card and the same DEG2 run over OCuLink
 on an Intel desktop. No driver version or Windows power setting reached it. The
 same power-state machinery appears to be implicated in both, on a path where the
 GPU never enters its low-power state.
+
+## Framework ships the same default, which breaks the theory
+
+The Framework Desktop BIOS is public, so the comparison the theory above needs can
+be made directly rather than inferred from AGESA version numbers. BIOS **3.06**
+(`Framework_Desktop_Ryzen_AI_MAX_300_BIOS_3.06_EFI.zip`) was unpacked, its signed
+capsule walked for firmware volumes, the LZMA sections decompressed and the AMD
+PBS HII packages parsed — 735 strings and a **223-question `AMD_PBS_SETUP`
+varstore** (id `0x0001`, size `0x180`), the same variable this rig carries.
+
+The parse validates against this rig's own dump on four independent points:
+`Non-Eval Discrete GPU Support` at offset `0x35`, `Wireless LAN Recovery` at
+`0x3F`, `Above 4GB MMIO Limit` = `40bit (1TB)`, `Special Display Features` =
+`HybridGraphics`. Same layout, same values.
+
+And then the result that matters:
+
+| Offset | Question | Framework 3.06 IFR default |
+|---|---|---|
+| `0x04` | Special Display Features | HybridGraphics (4) |
+| `0x0C` | **PCIE x4 DT Slot Power Enable** | **Enabled (1)** |
+| `0x10` | EVAL Slot Power Enable | Enabled (1) |
+| `0x29` | Discrete GPU Hotplug Mode | Enhanced Mode (1) |
+| `0x2A` | Discrete GPU HPD Circuitry | OR Circuitry (0) |
+| `0x32` | Above 4GB MMIO Limit | 40bit (1TB) |
+| **`0x35`** | **Non-Eval Discrete GPU Support** | **Disabled (0)** |
+| `0x47` | Discrete GPU D3Cold HPD Support | Disabled (0) |
+| `0x4E` | NVIDIA DGPU Power Enable | Disabled (0) |
+| `0x50` | D3Cold Force Gen1 | Disabled (0) |
+| `0x53` | **Discrete GPU's SSID/SVID** | **Program by Vendor (1)** |
+| `0x7F` | Discrete GPU's VGA SSID/SVID | 717073 |
+| `0xB0` | PCIe x4 Slot D3 Cold | Disabled (0) |
+| `0xB6` | External Graphics Port | Disabled (0) |
+
+**Framework ships `Non-Eval Discrete GPU Support` disabled, exactly as Minisforum
+does, and AMD dGPUs enumerate there anyway.** That byte cannot be what separates
+the two machines, and the central claim of the investigation above does not
+survive it.
+
+What survives, precisely stated: the IFR **defaults** are identical. The
+**runtime** value is known only on this rig, where it reads `0x00`. Framework's
+platform code could still write `0x01` at boot — this file already suspects
+`AmdPbsSetupDxe` of rewriting the variable every boot on the Minisforum side, and
+the same driver could behave differently with different platform data. So the
+option is not cleared as a cause; what is dead is the *reason to believe it*,
+which was that Framework must have enabled it.
+
+**One live variable read would settle it.** Anyone with a Framework Desktop can
+dump `AMD_PBS_SETUP` / `{A339D746-F678-49B3-9FC7-54CE0F9DF226}` offset `0x35` at
+runtime — `GetFirmwareEnvironmentVariableW` on Windows, `/sys/firmware/efi/efivars`
+on Linux. If it reads `0x01` the theory is back and stronger than before, because
+it would mean the value is set in code rather than in defaults. If it reads `0x00`
+the cause is elsewhere entirely.
+
+### What this dump points at instead
+
+Two rows are better candidates than `0x35`, and neither has been read on this rig:
+
+- **`0x0C` `PCIE x4 DT Slot Power Enable` = Enabled.** "DT" is desktop, and this
+  machine reaches its card through exactly that slot. If the Minisforum default
+  differs here, it would explain a root port that is never published far better
+  than an EVAL-pin check does. **This is the first thing to dump next.**
+- **`0x53` `Discrete GPU's SSID/SVID` = Program by Vendor**, with `0x7F`
+  `Discrete GPU's VGA SSID/SVID` carrying a value. This is the firmware
+  reprogramming the discrete card's subsystem ID — which explains why the
+  Framework capture reports `Subsystem: Framework Computer Inc.` on a card
+  Framework does not manufacture. **That capture is therefore not evidence of a
+  special Framework card**; it is a retail R9700 whose SSID their firmware
+  rewrote, which makes it a *better* comparison than it first appeared, not a
+  worse one.
+
+### Reproducing this
+
+No UEFI tooling is required beyond Python: the capsule is scanned for `_FVH`
+volumes, FFS files walked for section type `0x02` (GUID-defined) carrying the
+LZMA GUID `EE4E5898-3914-4259-9D6E-DC7BD79403CF`, those inflated with
+`lzma.FORMAT_ALONE`, and the resulting blobs searched for HII package headers —
+type `0x04` for strings, `0x02` for forms. Questions are `EFI_IFR_ONE_OF` (`0x05`)
+/ `CHECKBOX` (`0x06`) / `NUMERIC` (`0x07`); the default is the child
+`EFI_IFR_ONE_OF_OPTION` (`0x09`) carrying flag `0x10`
+(`EFI_IFR_OPTION_DEFAULT`), or an `EFI_IFR_DEFAULT` (`0x5B`) in the same scope.
+Scope is the high bit of the header's length byte, closed by `EFI_IFR_END`
+(`0x1E`) — tracking it is what separates one question's options from the whole
+form's.
 
 ## Every write channel is blocked
 
@@ -283,32 +378,31 @@ the image are PSP-signed, so a modified image may simply be refused — that is
 brick risk with an uncertain payoff, and it is not recommended while the vendor
 has not answered.
 
-What Minisforum would need to do, in order of preference:
+What Minisforum would need to do. The first two hold regardless of which byte
+turns out to be responsible, and are now the whole ask:
 
-1. Ship `Non-Eval Discrete GPU Support = Enabled` as the default.
-2. Expose the AMD PBS / CRB Advanced menus, and unhide `Above 4G Decoding`
+1. **Expose the AMD PBS / CRB Advanced menus**, and unhide `Above 4G Decoding`
    (`Setup` offset `0x65`, currently wrapped in `SuppressIf TRUE` although its
-   default is already Enabled).
-3. Make `AMD_PBS_SETUP` writable from the firmware's own setup browser. Today a
-   user can see the option, toggle it, and save it, and it silently reverts.
-4. Update AMD PI from 1002B patchC (their 1.09 release notes) to 1.0.0.2c, the
-   level Framework Desktop ships.
+   default is already Enabled). The identical `Non-Eval Discrete GPU Support`
+   option is a normal user-facing item on other AMD platforms — the ASUS ROG
+   STRIX X670E manual documents it under `AMD PBS → Graphics Features` with
+   `[Disabled] / [Enabled]` and the same EVAL-pin help string.
+2. **Make `AMD_PBS_SETUP` writable from the firmware's own setup browser.** Today
+   a user can see an option, toggle it, save it with F10, and watch it silently
+   revert. Whatever the cause of the enumeration failure turns out to be, a
+   platform where no setup value persists cannot be debugged by its owners — and
+   this is the finding that does not depend on any theory about which value
+   matters.
+3. **Say which AMD PBS defaults differ from AMD's reference values on this
+   board**, or publish the variable. Framework's image was readable, so that
+   comparison could be made for them; it cannot be made in the other direction
+   without guessing.
 
-> **Request 4 is the weak one, and it should be made honestly.** 1.0.0.2c is
-> traceable: Framework Desktop BIOS 3.04 moved AMD PI to 1.0.0.2, and 3.06
-> (stable, 2026-07-28) to 1.0.0.2c. But that changelog has ten items and **none
-> of them mentions discrete GPUs, PCIe enumeration or graphics**, beyond a boot
-> hang with "specific video encoder cards" and an iGPU memory cap. No Framework
-> release note claims a dGPU fix, so pairing the version with the working
-> enumeration is correlation, not a documented cause. `1002B patchC` may also
-> parse as 1.0.0.2B patch C rather than something strictly older than 1.0.0.2C,
-> which invites the reply "we already ship that".
->
-> The claim that does not depend on any of this: **the same option is exposed to
-> end users on other AMD platforms.** The ASUS ROG STRIX X670E BIOS manual
-> documents `AMD PBS → Graphics Features → Non-Eval Discrete GPU Support
-> [Disabled] / [Enabled]` with the identical EVAL-pin help string. It is a
-> normal, shippable, user-facing PBS item — which is what request 2 asks for.
+Two requests that earlier revisions of this file made and should not be repeated:
+shipping `Non-Eval Discrete GPU Support = Enabled` (Framework ships it disabled
+and works), and updating AMD PI to 1.0.0.2c (traceable to Framework BIOS 3.06,
+but that changelog names no dGPU or PCIe fix, and `1002B patchC` may not even be
+older than `1.0.0.2C` — the pairing was correlation).
 
 Tracking threads:
 [r/MINISFORUM](https://www.reddit.com/r/MINISFORUM/comments/1wm94cz/mss1_max_doesnt_work_with_amd_gpus_radeon_ai_pro/),
