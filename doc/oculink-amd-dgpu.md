@@ -320,6 +320,30 @@ Reading the live variable on a working Framework Desktop would strengthen or kil
 this in one step, since it would show whether `0x05` and `0x35` hold their IFR
 defaults at runtime on a machine where AMD cards enumerate.
 
+**What the forums add.** Two things, pulling opposite ways.
+
+For it: **`Int Graphics (IGD)` is the documented default on other AMD boards.**
+ASRock's manuals for the A620M Pro RS and B650 Pro RS list `Advanced → AMD PBS →
+Graphics Features → Primary Video Adaptor` with `Int Graphics (IGD)` as the
+default and `Ext Graphics (PEG)` as the alternative. Framework matches that
+reference default; the MS-S1 Max is the deviation.
+
+Against it: **nobody reports this option affecting PCIe enumeration.** It is
+documented and discussed purely as a *display output* selector — and the usual
+advice runs the other way, IGD → PEG, for people who want a discrete card to
+drive the screen. For the mechanism above to hold, PEG has to additionally make
+the firmware *initialise* the discrete card during POST, which is plausible but
+is a chain rather than a documented behaviour. Treat the confidence accordingly:
+the diff is a measurement, the mechanism is not.
+
+**And one finding that belongs with the request instead.** Minisforum already
+exposes this menu on another of their AMD machines: the MS-A2 carries
+`Advanced → AMD PBS → Graphics Configurations` in its normal BIOS UI, with
+`Primary Video Adaptor` and `Special Display Features` both user-settable. So
+hiding AMD PBS on the MS-S1 Max is an inconsistency inside their own product
+line, not a company position — which makes it a much easier thing to ask them to
+change.
+
 ### Reproducing this
 
 No UEFI tooling is required beyond Python: the capsule is scanned for `_FVH`
@@ -442,9 +466,12 @@ turns out to be responsible, and are now the whole ask:
 
 1. **Expose the AMD PBS / CRB Advanced menus**, and unhide `Above 4G Decoding`
    (`Setup` offset `0x65`, currently wrapped in `SuppressIf TRUE` although its
-   default is already Enabled). The identical `Non-Eval Discrete GPU Support`
-   option is a normal user-facing item on other AMD platforms — the ASUS ROG
-   STRIX X670E manual documents it under `AMD PBS → Graphics Features` with
+   default is already Enabled). **Minisforum already does this on the MS-A2**,
+   which carries `Advanced → AMD PBS → Graphics Configurations` in its retail UI
+   with `Primary Video Adaptor` user-settable — so this is an inconsistency in
+   their own line rather than a policy. The identical `Non-Eval Discrete GPU
+   Support` option is likewise user-facing on other vendors' AMD boards; the ASUS
+   ROG STRIX X670E manual documents it under `AMD PBS → Graphics Features` with
    `[Disabled] / [Enabled]` and the same EVAL-pin help string.
 2. **Make `AMD_PBS_SETUP` writable from the firmware's own setup browser.** Today
    a user can see an option, toggle it, save it with F10, and watch it silently
