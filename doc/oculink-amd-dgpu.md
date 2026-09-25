@@ -36,20 +36,29 @@ NVIDIA cards work on the identical path. An RTX 5090 and an RTX PRO 6000 both
 enumerated over OCuLink on this machine; the R9700 does not. That asymmetry is
 the thread this whole investigation pulls on.
 
-**It is not specific to this machine.** The community Strix Halo wiki's
+**The platform treats AMD cards differently — but elsewhere they still work.**
+The community Strix Halo wiki's
 [external-GPU guide](https://strixhalo.wiki/Guides/External_GPU) records the same
-split across the platform — AMD discrete cards have documented problems while
-"**no problems were reported with NVIDIA GPUs**". It documents no working AMD
-OCuLink configuration and names no BIOS setting that fixes one, so as far as the
-community record goes this is a Strix Halo pattern with Framework as the only
-counter-example. It also notes a separate AMD-specific quirk worth knowing: the
-external card's power limit gets tied to the APU's.
+vendor split, with "**no problems were reported with NVIDIA GPUs**" against
+documented AMD trouble. Crucially, the AMD trouble it describes is a **power cap,
+not absence**: the external card's power limit gets tied to the APU's, and
+secondary coverage puts it concretely — on most current Strix Halo boards an AMD
+discrete GPU over OCuLink or an M.2 riser is capped at ~120 W regardless of the
+card, 7900 XTX or Vega 64 alike.
 
-That raises an obvious next comparison that has **not** been done: the FEVM
-FA-EX9 is Strix Halo with OCuLink on the board and an OCuLink adapter in the box,
-so its BIOS would be the third image to diff — same silicon, same AMD reference
-code, OCuLink as a shipped feature rather than an adapter hack. No public BIOS
-download for it was found.
+Which means **this machine is an outlier even among Strix Halo boards.** The
+platform norm for an AMD card over OCuLink is "enumerates and runs, throttled".
+Here it does not appear at all. So there is AMD-specific discrete-GPU machinery in
+these firmwares — consistent with everything below — and on other boards it
+mishandles the card's power budget, while on this one it never publishes the port.
+
+That sharpens the comparison worth making. **FEVM ships Strix Halo with OCuLink
+from the factory** — the FAEX1 (1-litre chassis, OCuLink 64 Gbps, the earlier of
+the two) and the FA-EX9 (OCuLink plus an adapter in the box); the M1A Pro+ reaches
+it through an internal M.2 adapter. Any of those BIOS images would be the third
+diff, and a far better control than Framework: same silicon, same reference code,
+and OCuLink as a shipped feature. No public download was found for either FEVM
+model.
 
 ## The symptom
 
