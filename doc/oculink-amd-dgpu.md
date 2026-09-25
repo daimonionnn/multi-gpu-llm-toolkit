@@ -4,14 +4,17 @@ A firmware investigation on **`halo-win`**, traced from "the card is not in Devi
 Manager" down to one byte in one UEFI variable — and then to the discovery that
 the byte cannot be written from any channel a user has.
 
-**Status: the leading theory did not survive.** Framework Desktop's public BIOS
-was extracted and it ships `Non-Eval Discrete GPU Support` **disabled at the same
-offset**, while AMD dGPUs enumerate there — so that byte is not what separates
-the two machines. See [Framework ships the same default](#framework-ships-the-same-default-which-breaks-the-theory).
-The symptom, the evidence and the write-protection findings below all stand; the
-explanation does not. Two better candidates and the one measurement that would
-settle it are named in that section. One owner also reports an R9700 working over
-OCuLink on an MS-S1 Max with a *DEG1* dock ([what other machines show](#what-other-machines-show)).
+**Status: one byte short of an answer, and unable to test it.** Both BIOS images
+were extracted and diffed. The two `AMD_PBS_SETUP` varstores are identical in
+layout — 223 questions, same offsets — and `Non-Eval Discrete GPU Support` is
+**disabled on both**, so the original theory is dead. But in the whole
+discrete-graphics block exactly one value differs: **`Primary Video Adaptor`,
+which Minisforum sets to `Ext Graphics (PEG)` and Framework to `Int Graphics
+(IGD)`** — and that plausibly decides whether the firmware enters the AMD dGPU
+path at all. See [the full diff](#the-full-diff-223-questions-each-22-differ-and-only-one-of-them-is-graphics).
+It cannot be tested here, because nothing in `AMD_PBS_SETUP` survives a reboot —
+which is now the request. One owner also reports an R9700 working over OCuLink on
+an MS-S1 Max with a *DEG1* dock ([what other machines show](#what-other-machines-show)).
 
 ## Why this is in a multi-GPU repo
 
@@ -244,22 +247,78 @@ on Linux. If it reads `0x01` the theory is back and stronger than before, becaus
 it would mean the value is set in code rather than in defaults. If it reads `0x00`
 the cause is elsewhere entirely.
 
-### What this dump points at instead
+### The full diff: 223 questions each, 22 differ, and only one of them is graphics
 
-Two rows are better candidates than `0x35`, and neither has been read on this rig:
+Both images were parsed the same way — Minisforum `SHWSA.BIN` 1.11 (260828A) against
+Framework 3.06. The two `AMD_PBS_SETUP` varstores are structurally identical:
+**id `0x0001`, size `0x180`, 223 questions each, every offset in the same place.**
+22 values differ, and the rest are AMD's reference defaults on both boards.
 
-- **`0x0C` `PCIE x4 DT Slot Power Enable` = Enabled.** "DT" is desktop, and this
-  machine reaches its card through exactly that slot. If the Minisforum default
-  differs here, it would explain a root port that is never published far better
-  than an EVAL-pin check does. **This is the first thing to dump next.**
-- **`0x53` `Discrete GPU's SSID/SVID` = Program by Vendor**, with `0x7F`
-  `Discrete GPU's VGA SSID/SVID` carrying a value. This is the firmware
-  reprogramming the discrete card's subsystem ID — which explains why the
-  Framework capture reports `Subsystem: Framework Computer Inc.` on a card
-  Framework does not manufacture. **That capture is therefore not evidence of a
-  special Framework card**; it is a retail R9700 whose SSID their firmware
-  rewrote, which makes it a *better* comparison than it first appeared, not a
-  worse one.
+Most of the 22 are ordinary platform wiring — WLAN lane count, WWAN power, sensor
+drivers, Bluetooth PLDR, NVMe D3Cold, SD reader, display-port routing. In the
+entire discrete-graphics block **exactly one option differs**:
+
+| Offset | Question | Framework 3.06 | Minisforum 1.11 |
+|---|---|---|---|
+| `0x04` | Special Display Features | HybridGraphics (4) | HybridGraphics (4) |
+| **`0x05`** | **Primary Video Adaptor** | **Int Graphics (IGD) (1)** | **Ext Graphics (PEG) (2)** |
+| `0x0C` | PCIE x4 DT Slot Power Enable | Enabled (1) | Enabled (1) |
+| `0x10` | EVAL Slot Power Enable | Enabled (1) | Enabled (1) |
+| `0x29` | Discrete GPU Hotplug Mode | Enhanced Mode (1) | Enhanced Mode (1) |
+| `0x2A` | Discrete GPU HPD Circuitry | OR Circuitry (0) | OR Circuitry (0) |
+| `0x32` | Above 4GB MMIO Limit | 40bit (1TB) | 40bit (1TB) |
+| `0x35` | Non-Eval Discrete GPU Support | Disabled (0) | Disabled (0) |
+| `0x47` | Discrete GPU D3Cold HPD Support | Disabled (0) | Disabled (0) |
+| `0x4E` | NVIDIA DGPU Power Enable | Disabled (0) | Disabled (0) |
+| `0x50` | D3Cold Force Gen1 | Disabled (0) | Disabled (0) |
+| `0x53` | Discrete GPU's SSID/SVID | Program by Vendor (1) | Program by Vendor (1) |
+| `0xB0` | PCIe x4 Slot D3 Cold | Disabled (0) | Disabled (0) |
+| `0xB6` | External Graphics Port | Disabled (0) | Disabled (0) |
+
+Two non-graphics differences are worth recording anyway:
+
+| Offset | Question | Framework | Minisforum |
+|---|---|---|---|
+| `0x7F` | Discrete GPU's VGA SSID/SVID | 717073 | **0** |
+| `0x87` | USB4 Bus Reserved | 96 | **48** |
+
+`0x53` says *Program by Vendor* on both boards, so both firmwares intend to
+rewrite an attached discrete card's subsystem ID — Framework from a real value,
+Minisforum from **zero**. That is what produced `Subsystem: Framework Computer
+Inc.` in the capture above, and it is why that capture is a retail card rather
+than a branded one.
+
+### The hypothesis this suggests, and it is a hypothesis
+
+`Primary Video Adaptor = Ext Graphics (PEG)` tells the firmware that the primary
+display adapter is the external PCIe card. Framework says *integrated*.
+
+That single difference makes the two `0x35` values mean different things. With
+Primary = IGD, firmware has no reason to bring a discrete card up as the primary
+display, so it never enters the AMD dGPU-as-primary path and `Non-Eval Discrete
+GPU Support = Disabled` costs nothing — which is exactly what Framework's working
+machine looks like. With Primary = PEG, firmware must initialise the discrete card
+during POST, enters the AMD branch, looks for the EVAL sideband it cannot find,
+and disables the port — which is exactly what this machine looks like.
+
+It also survives the NVIDIA asymmetry, which is the test the simple version
+failed. NVIDIA cards are handled by their own branch (`NVIDIA DGPU Power Enable`,
+`0x4E`) and never reach the AMD presence check, so Primary = PEG is harmless for
+them. **The two settings have to be read together**: `0x05` decides whether the
+firmware cares, and `0x35` decides what happens when it does.
+
+**Stated honestly:** this was constructed to fit the evidence after the fact. It
+is consistent with everything on this page — the vanished root port, the NVIDIA
+asymmetry, Framework working with the same `0x35` — and it is the only graphics
+difference in 223 options, which is why it is the leading candidate. It has not
+been tested, and on this machine it cannot be: nothing in `AMD_PBS_SETUP`
+persists across a reboot, so `0x05` cannot be set to IGD and retried. That is the
+whole problem, and it is why the request below is about persistence rather than
+about any particular byte.
+
+Reading the live variable on a working Framework Desktop would strengthen or kill
+this in one step, since it would show whether `0x05` and `0x35` hold their IFR
+defaults at runtime on a machine where AMD cards enumerate.
 
 ### Reproducing this
 
@@ -393,10 +452,10 @@ turns out to be responsible, and are now the whole ask:
    platform where no setup value persists cannot be debugged by its owners — and
    this is the finding that does not depend on any theory about which value
    matters.
-3. **Say which AMD PBS defaults differ from AMD's reference values on this
-   board**, or publish the variable. Framework's image was readable, so that
-   comparison could be made for them; it cannot be made in the other direction
-   without guessing.
+3. **Explain `Primary Video Adaptor = Ext Graphics (PEG)` at offset `0x05`**, or
+   ship it as `Int Graphics (IGD)`. It is the only discrete-graphics value that
+   differs from Framework's image across all 223 questions, on a machine whose
+   display comes from the iGPU. If it is deliberate, say what depends on it.
 
 Two requests that earlier revisions of this file made and should not be repeated:
 shipping `Non-Eval Discrete GPU Support = Enabled` (Framework ships it disabled
