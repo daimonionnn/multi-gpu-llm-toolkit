@@ -86,8 +86,27 @@ machinery, and a retail card on a dock is not what it was written for.
 
 ## What other machines show
 
-Two reports from the [r/LocalLLaMA thread](https://www.reddit.com/r/LocalLLaMA/comments/1wi87ac/mss1_max_radeon_ai_pro_r9700_over_oculink_no/)
-bear directly on the theory above. One supports it, one does not fit it.
+Three cases bear on the theory above: one control run here, and two reports from
+the [r/LocalLLaMA thread](https://www.reddit.com/r/LocalLLaMA/comments/1wi87ac/mss1_max_radeon_ai_pro_r9700_over_oculink_no/)
+of which one supports it and one does not fit it.
+
+### The same card and dock work on an Intel desktop, unchanged
+
+This R9700, this DEG2 and this RIITOP adapter run on an ASUS Pro Creator Z890 at
+the same **PCIe 4.0 x4**, out of the box, with no BIOS changes. The only variable
+that moves between there and here is the host firmware, which rules out the card,
+the dock, the adapter, the cable, the PSU wiring and the link width in one step —
+on hardware that is not somebody else's report.
+
+What it cannot do is speak to the AMD-specific path, because Intel firmware has
+no AMD PBS module, no `AMD_PBS_SETUP` and no EVAL-pin concept: it enumerates the
+card generically, the way this machine already treats NVIDIA cards. That is the
+point of pairing it with the Framework capture below. **Framework rules out the
+silicon; the Z890 rules out everything downstream of the host.** What is left
+between them is this machine's firmware.
+
+(The under-10 W idle figure quoted at the end of this section is from that
+machine.)
 
 ### Framework Desktop enumerates an R9700 — with two caveats
 
