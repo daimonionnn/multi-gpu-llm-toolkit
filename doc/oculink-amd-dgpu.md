@@ -534,6 +534,15 @@ turns out to be responsible, and are now the whole ask:
    differs from Framework's image across all 223 questions, on a machine whose
    display comes from the iGPU. If it is deliberate, say what depends on it.
 
+> **The direction of that request reads backwards, and it is worth pre-empting.**
+> `PEG` sounds like the setting you would want with an external card attached, and
+> the common advice for this option does run `IGD → PEG`. But that advice is about
+> **which adapter drives the monitor**, not about whether the port is enumerated at
+> all — and `IGD` is what the machine that works has, as well as ASRock's
+> documented default. Under the hypothesis above the two are not in tension: `PEG`
+> is what forces the firmware to initialise the discrete card during POST, which is
+> where it then fails.
+
 Two requests that earlier revisions of this file made and should not be repeated:
 shipping `Non-Eval Discrete GPU Support = Enabled` (Framework ships it disabled
 and works), and updating AMD PI to 1.0.0.2c (traceable to Framework BIOS 3.06,
