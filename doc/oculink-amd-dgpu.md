@@ -162,7 +162,12 @@ on hardware that is not somebody else's report.
 
 What it cannot do is speak to the AMD-specific path, because Intel firmware has
 no AMD PBS module, no `AMD_PBS_SETUP` and no EVAL-pin concept: it enumerates the
-card generically, the way this machine already treats NVIDIA cards. That is the
+card generically, the way this machine already treats NVIDIA cards. AMD *desktop*
+boards do carry AMD PBS — ASRock documents both `Non-Eval Discrete GPU Support`
+and `Primary Video Adaptor` on theirs — but with desktop-oriented defaults and
+exposed to the user, because a retail card in a slot is the expected case there.
+Strix Halo is a laptop reference design in a desktop box; the hybrid-graphics and
+EVAL-slot branch exists only on this class of machine. That is the
 point of pairing it with the Framework capture below. **Framework rules out the
 silicon; the Z890 rules out everything downstream of the host.** What is left
 between them is this machine's firmware.
