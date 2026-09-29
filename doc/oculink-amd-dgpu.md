@@ -538,6 +538,30 @@ no equivalent is documented for the DEG2. Whether the three docks differ exactly
 here is unknown, and it is the user-level explanation this page currently
 considers most likely.
 
+**What the three docks actually do is documented, and it lines up.** Each dock's
+power-on behaviour is public, and it maps onto the R9700 results exactly:
+
+| Dock | Power behaviour (documented) | R9700 on an MS-S1 Max |
+|---|---|---|
+| **AOSTAR AG02** | PSU **always on** — the power button has no function, 12 V sits on the PCIe connectors permanently, and OCuLink is explicitly not hot-pluggable (cable with everything off) | **works** (the Fedora unit) |
+| **Minisforum DEG2** | "powers on automatically with the host" — card power ramps at host power-on | never enumerates (this rig) |
+| **Minisforum DEG1** | switches select ATX power behaviour; the documented symptom of a wrong position is *"the host system may boot without seeing the external card at all"* | works for at least one owner, after Gen3 + switch changes |
+
+The working dock keeps the card **permanently powered**, so its integrated switch
+is up and stable long before the host ever polls; the failing dock races the
+card's power-up against the host's enumeration window; and the configurable
+dock's own documentation names this rig's exact symptom as what a wrong power
+switch produces. Three docks, three power strategies, and the outcome tracks the
+power strategy rather than anything else measured so far.
+
+One honest tension remains: on the bare RIITOP adapter, powering the NVIDIA card
+*early* also failed — only the 2–3 s late window worked. So "powered early" is
+not sufficient by itself; it works on the AG02 presumably because the dock also
+handles PERST# properly, where a card powered early on a bare riser sits through
+the host's early boot with its sidebands in whatever state the adapter leaves
+them. The rail timing and the sideband handling have to be right together, which
+is exactly the layer a dock exists to own.
+
 **The decisive test is now cheap.** The AG02 is confirmed working with this card
 on an identical machine and firmware build, so running this rig's R9700 through an
 AG02 is a controlled A/B in which nothing changes but the dock. That, and a live
