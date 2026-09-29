@@ -469,6 +469,51 @@ The OS difference cannot be dismissed either: everything here was measured on
 Windows, and the equivalent check needs a live Linux boot with the card attached,
 which has not been done. That is the cheapest remaining experiment on this side.
 
+### The only thing a passive dock can break: power and reset sequencing
+
+Worth being precise about what an OCuLink dock *is*, because it bounds what it can
+possibly be doing wrong. OCuLink (SFF-8611) is a cable standard for PCIe lanes —
+unlike Thunderbolt it tunnels and translates nothing, so the link is electrically
+what it would be on a board trace. A dock is therefore:
+
+- an OCuLink connector wired to a PCIe slot (mechanically x16, electrically x4)
+- power: an ATX input or built-in supply feeding the slot's 12 V and 3.3 V rails
+  and the card's aux connectors
+- a **redriver** (analogue equaliser) or **retimer** (digital repeater) to survive
+  the cable length
+- **power and reset sequencing**: PWREN, power-good, and when PERST# is released
+- sometimes DIP switches configuring exactly that — the DEG1 carries three
+
+Redrivers and retimers are transparent to PCIe topology: neither is a PCI device,
+so **nothing belonging to the dock appears in `lspci` at all**. A switch would
+appear, but OCuLink docks do not carry one unless they fan lanes out to several
+slots. This is why the only bridges in front of the card are `1002:1478` and
+`1002:1479`, which belong to the Navi part itself.
+
+That leaves exactly one mechanism by which a passive dock can stop a root port from
+being published: **it presents the card outside the window in which firmware looks
+for it.** If power-good or PERST# release lands late, firmware finds an empty port
+during POST and disables it — which is the observed symptom, and is consistent with
+`pci=realloc` and a rescan doing nothing, since by then there is no bridge to work
+with.
+
+The firmware's side of that handshake is visible in the dump and is not the
+difference — these read identically on both boards — but they establish that a
+fixed timed sequence exists to be missed:
+
+| Offset | Timer | Value |
+|---|---|---:|
+| `0x6F` | SLOTPWR-PWREN Timing (ms) | 1 |
+| `0x70` | PWREN-RST Timing (ms) | 80 |
+| `0x71` | PERST-WAKEL23 Timing (ms) | 10 |
+| `0x72` | DLACT-CFGACC Timing (ms) | 100 |
+
+This also explains what the DEG1's three switches are for, and why flipping them
+changed the outcome for one owner. It predicts that startup order matters — the
+thread's author tried dock-before-host without success on their unit, which is one
+data point against, not a refutation. **Nothing here has been tested on this rig**,
+and it is where the next attempt should go rather than back into the BIOS.
+
 ### What survives, and why it still matters
 
 The write-protection findings are untouched by any of this and are worth fixing on
