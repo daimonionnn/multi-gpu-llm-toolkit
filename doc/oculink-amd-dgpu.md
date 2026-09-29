@@ -508,11 +508,41 @@ fixed timed sequence exists to be missed:
 | `0x71` | PERST-WAKEL23 Timing (ms) | 10 |
 | `0x72` | DLACT-CFGACC Timing (ms) | 100 |
 
-This also explains what the DEG1's three switches are for, and why flipping them
-changed the outcome for one owner. It predicts that startup order matters — the
-thread's author tried dock-before-host without success on their unit, which is one
-data point against, not a refutation. **Nothing here has been tested on this rig**,
-and it is where the next attempt should go rather than back into the BIOS.
+**That window has already been probed by hand on this rig.** Before the docks,
+cards were attached through the bare RIITOP adapter with the card's power supply
+switched manually:
+
+- **The NVIDIA card enumerated only when its power arrived ~2–3 s after the
+  host's**, with a tolerance of tens to low hundreds of milliseconds around that
+  point. Powered together with the host it never appeared; powered too late,
+  never. That is the enumeration window measured by hand: firmware looks once,
+  during POST, and a card absent at that moment leaves a disabled port.
+- **The DEG2 then removed the timing problem for NVIDIA entirely** — in the dock
+  the same card comes up with everything powered together, because the dock's
+  sequencer presents it inside the window automatically.
+- **No manual timing ever produced the AMD card** — earlier, later, swept in both
+  directions, on the bare adapter and in the DEG2 alike.
+
+Read precisely, the AMD result does not kill the sequencing explanation — it
+shows that hand-timing the supply moves only one of the variables. The dock also
+sequences **PERST# and the reference clock**, which arrive over the OCuLink cable,
+and the Navi card is structurally different from the NVIDIA one at exactly this
+point: its integrated switch (`1002:1478`/`1479`) has to come up and link-train
+before anything behind it is visible, so "present" runs on a different schedule
+than for a single-endpoint card — a schedule started by PERST#/REFCLK, not by the
+12 V rail. Some sequencer does get this right for AMD on this same firmware: the
+AOSTAR AG02 on the working unit. The DEG2's evidently does not, and the DEG1 sits
+between the two — at least one owner runs an AMD card on it, after forcing Gen3
+and moving its three DIP switches, which are precisely a sequencing configuration;
+no equivalent is documented for the DEG2. Whether the three docks differ exactly
+here is unknown, and it is the user-level explanation this page currently
+considers most likely.
+
+**The decisive test is now cheap.** The AG02 is confirmed working with this card
+on an identical machine and firmware build, so running this rig's R9700 through an
+AG02 is a controlled A/B in which nothing changes but the dock. That, and a live
+Linux boot with the card attached, are where the next attempt should go rather
+than back into the BIOS.
 
 ### What survives, and why it still matters
 
