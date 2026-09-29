@@ -4,17 +4,16 @@ A firmware investigation on **`halo-win`**, traced from "the card is not in Devi
 Manager" down to one byte in one UEFI variable — and then to the discovery that
 the byte cannot be written from any channel a user has.
 
-**Status: one byte short of an answer, and unable to test it.** Both BIOS images
-were extracted and diffed. The two `AMD_PBS_SETUP` varstores are identical in
-layout — 223 questions, same offsets — and `Non-Eval Discrete GPU Support` is
-**disabled on both**, so the original theory is dead. But in the whole
-discrete-graphics block exactly one value differs: **`Primary Video Adaptor`,
-which Minisforum sets to `Ext Graphics (PEG)` and Framework to `Int Graphics
-(IGD)`** — and that plausibly decides whether the firmware enters the AMD dGPU
-path at all. See [the full diff](#the-full-diff-223-questions-each-22-differ-and-only-one-of-them-is-graphics).
-It cannot be tested here, because nothing in `AMD_PBS_SETUP` survives a reboot —
-which is now the request. One owner also reports an R9700 working over OCuLink on
-an MS-S1 Max with a *DEG1* dock ([what other machines show](#what-other-machines-show)).
+**Status: the firmware-settings explanation is closed.** A working MS-S1 Max —
+**same BIOS 1.11 SHWSA (2026-08-28)**, R9700 over OCuLink at Gen4 x4 on root port
+`00:03.1` — reads `0x05 = 0x02 (PEG)` and `0x35 = 0x00 (off)`, byte-identical to
+this rig. Both BIOS images were also extracted and diffed, and `Non-Eval Discrete
+GPU Support` is disabled on Framework too. **No AMD PBS value explains this**, and
+the investigation below should be read as the elimination of that possibility
+rather than as a diagnosis. The write-protection findings stand on their own and
+are still worth fixing. What is left is downstream of the firmware: this rig uses
+a **Minisforum DEG2**, the working one an **AOSTAR AG02**.
+See [the report that settled it](#the-test-came-back-and-the-hypothesis-is-dead).
 
 ## Why this is in a multi-GPU repo
 
@@ -192,7 +191,7 @@ A 32 GiB prefetchable BAR0 allocated and `amdgpu` bound, on the same Ryzen AI
 Max+ 395 silicon. **The limit is not in the CPU** — that is what this capture
 settles, and it is the strongest evidence against a silicon explanation.
 
-One caveat stands and one was withdrawn:
+Both caveats originally raised here have been withdrawn:
 
 - ~~**`Subsystem: Framework Computer Inc. Device 000a`** means a Framework-branded
   card rather than a retail one.~~ **Withdrawn.** Their BIOS sets
@@ -200,11 +199,14 @@ One caveat stands and one was withdrawn:
   so the firmware *rewrites* the subsystem ID of whatever discrete card is
   attached. The capture is a retail R9700 relabelled by Framework's firmware,
   which makes it a better comparison than it first appeared.
-- **The topology is not matched.** The reported tree is
-  `00:02.5-[c1-c3]----00.0-[c2]----00.0-[c3]--+-00.0 Navi 48` — two bridges
-  between root port and GPU, on root port `02.5`. `halo-win` reaches its x4 slot
-  through `00:03.1` with no intermediate bridge. Same silicon, same class of
-  card, different path.
+- ~~**The topology is not matched**, because the reported tree has two bridges
+  between root port and GPU.~~ **Withdrawn.** Those two bridges are the *card's
+  own*: every Navi part presents an integrated switch pair, `1002:1478` upstream
+  and `1002:1479` downstream, so `00.0-[c2]----00.0-[c3]--+-00.0 Navi 48` is a
+  plain direct attachment, not a tunnel or a dock switch. A working MS-S1 Max
+  reports the same `1002:1478` in front of its R9700. The Framework capture is
+  therefore a clean comparison — retail card, matched topology — and both caveats
+  originally raised against it have now been withdrawn.
 
 ### One MS-S1 Max is reported working, and the theory does not predict it
 
@@ -413,6 +415,70 @@ Scope is the high bit of the header's length byte, closed by `EFI_IFR_END`
 (`0x1E`) — tracking it is what separates one question's options from the whole
 form's.
 
+## The test came back, and the hypothesis is dead
+
+The request above was posted with its decision rule attached: if a working machine
+reads the same two bytes, the theory is wrong. An owner of a **working MS-S1 Max**
+answered it.
+
+| | this rig | working MS-S1 Max |
+|---|---|---|
+| BIOS | 1.11 SHWSA, 2026-08-28 | **1.11 SHWSA, 2026-08-28** |
+| `0x05` Primary Video Adaptor | `0x02` (PEG) | **`0x02` (PEG)** |
+| `0x35` Non-Eval Discrete GPU | `0x00` (off) | **`0x00` (off)** |
+| R9700 over OCuLink | absent from PCI | **Gen4 x4 on root port `00:03.1`** |
+
+Same machine, same firmware build, same card, same link width, same root port.
+Both bytes identical. **`Primary Video Adaptor` is not the cause, and neither is
+anything else in `AMD_PBS_SETUP`** — a value that is the same on a working unit
+cannot be what breaks this one.
+
+That closes the whole line of investigation on this page. It is worth being
+explicit about what was eliminated, because it was eliminated properly rather than
+abandoned:
+
+- Not `Non-Eval Discrete GPU Support` — disabled on Framework, and on a working
+  MS-S1 Max, both of which enumerate.
+- Not `Primary Video Adaptor` — identical on a working unit.
+- Not any other AMD PBS value, by the same argument: the working unit runs the
+  same BIOS build, so every one of the 223 questions holds the same default.
+- Not the BIOS version, for the same reason.
+- Not the card, the link width, the root port or the PCIe generation — the
+  working unit matches this rig on all of them.
+
+### What is actually left
+
+The working configuration differs from this one in hardware downstream of the
+firmware:
+
+| | this rig | working unit |
+|---|---|---|
+| OCuLink dock | Minisforum **DEG2** | **AOSTAR AG02** |
+| TB5 dock | Minisforum DEG2 | AOSTAR AG03 |
+| OS | Windows | Fedora 44 |
+
+**The dock is now the leading suspect**, which is where the Thunderbolt half of
+this rig's troubles already pointed —
+[8 of 12 dual loads fail on that dock](benchmarks.md#the-dual-layout-is-not-stable-on-this-dock-and-the-link-rate-is-not-the-variable),
+and the DEG1 report [above](#one-ms-s1-max-is-reported-working-and-the-theory-does-not-predict-it)
+needed three undocumented workarounds on a *different* Minisforum dock. Two
+Minisforum docks, two sets of trouble, and an AOSTAR dock that simply works, is a
+pattern worth taking seriously even though it is three data points.
+
+The OS difference cannot be dismissed either: everything here was measured on
+Windows, and the equivalent check needs a live Linux boot with the card attached,
+which has not been done. That is the cheapest remaining experiment on this side.
+
+### What survives, and why it still matters
+
+The write-protection findings are untouched by any of this and are worth fixing on
+their own account. **Nothing in `AMD_PBS_SETUP` persists across a reboot** on this
+machine: an option can be seen, toggled, saved with F10, and it silently reverts —
+including a harmless control option in the same variable. That is what made this
+investigation take BIOS-image extraction and a stranger's variable dump to reach a
+negative result. On a platform where setup values stick, it would have been twenty
+minutes.
+
 ## Every write channel is blocked
 
 The option is reachable and visibly toggleable. It still cannot be changed.
@@ -534,25 +600,14 @@ turns out to be responsible, and are now the whole ask:
    platform where no setup value persists cannot be debugged by its owners — and
    this is the finding that does not depend on any theory about which value
    matters.
-3. **Explain `Primary Video Adaptor = Ext Graphics (PEG)` at offset `0x05`**, or
-   ship it as `Int Graphics (IGD)`. It is the only discrete-graphics value that
-   differs from Framework's image across all 223 questions, on a machine whose
-   display comes from the iGPU. If it is deliberate, say what depends on it.
+3. **Provide a test BIOS, or say what differs between units.** A working MS-S1
+   Max on this same BIOS build enumerates an R9700 over OCuLink where this one
+   does not, so something outside `AMD_PBS_SETUP` differs between them.
 
-> **The direction of that request reads backwards, and it is worth pre-empting.**
-> `PEG` sounds like the setting you would want with an external card attached, and
-> the common advice for this option does run `IGD → PEG`. But that advice is about
-> **which adapter drives the monitor**, not about whether the port is enumerated at
-> all — and `IGD` is what the machine that works has, as well as ASRock's
-> documented default. Under the hypothesis above the two are not in tension: `PEG`
-> is what forces the firmware to initialise the discrete card during POST, which is
-> where it then fails.
-
-Two requests that earlier revisions of this file made and should not be repeated:
-shipping `Non-Eval Discrete GPU Support = Enabled` (Framework ships it disabled
-and works), and updating AMD PI to 1.0.0.2c (traceable to Framework BIOS 3.06,
-but that changelog names no dGPU or PCIe fix, and `1002B patchC` may not even be
-older than `1.0.0.2C` — the pairing was correlation).
+Two earlier requests are withdrawn as refuted: shipping `Non-Eval Discrete GPU
+Support = Enabled` (Framework ships it disabled and works), and changing
+`Primary Video Adaptor` at `0x05` to IGD (a working MS-S1 Max reads PEG, exactly
+as this one does). A third, updating AMD PI to 1.0.0.2c, was correlation.
 
 Tracking threads:
 [r/MINISFORUM](https://www.reddit.com/r/MINISFORUM/comments/1wm94cz/mss1_max_doesnt_work_with_amd_gpus_radeon_ai_pro/),
