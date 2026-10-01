@@ -582,10 +582,18 @@ recollection holds, it is precisely the test the PS_ON jumper could not run, and
 its result kills the power-strategy explanation outright: an always-powered card
 on a DEG2 still never enumerates, so what separates the AG02 would be **PERST#
 and reference-clock handling or signal conditioning**, not when the rails come
-up. Re-verification is one run: flip all three, confirm the card's fan runs with
-the host off, boot, look for the root port. Either ending is decisive — card
-appears means the switches are a workaround; card absent means the power strategy
-is eliminated and the sideband layer is all that is left.
+up. Re-verification is two runs, not one: flip all three, confirm the card's fan
+runs with the host off, boot, look for the root port — **once at the default link
+speed and once with Gen3 forced in BIOS**. The DEG1 success was a *combination*
+(switches + forced Gen3 + `amdgpu.runpm=0`), not the switches alone, and on this
+rig Gen3 has only ever been tested with the switches at their factory positions.
+The combination is the closest possible replication of the one working
+Minisforum-dock report, on a dock whose signal path is busier than the DEG1's:
+the DEG2's OCuLink lanes share the board with a second, USB4/TB5 path — mux or
+routing the single-purpose DEG1 does not carry — so a link that is marginal here
+may need both the card held up *and* the slower rate. Card appears in either run:
+the switches (plus rate) are a workaround. Card absent in both: power strategy is
+eliminated and the sideband/signal layer is all that is left.
 
 What remains is the real A/B: an **AG02 on this rig**, confirmed working with
 this card on an identical machine and firmware build, so nothing changes but the
