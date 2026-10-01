@@ -562,11 +562,21 @@ the host's early boot with its sidebands in whatever state the adapter leaves
 them. The rail timing and the sideband handling have to be right together, which
 is exactly the layer a dock exists to own.
 
-**The decisive test is now cheap.** The AG02 is confirmed working with this card
-on an identical machine and firmware build, so running this rig's R9700 through an
-AG02 is a controlled A/B in which nothing changes but the dock. That, and a live
-Linux boot with the card attached, are where the next attempt should go rather
-than back into the BIOS.
+**The cheap version of the decisive test was run (2026-09-26), and the DEG2
+refused to take it.** The ATX PSU's PS_ON was jumpered so the supply ran before
+the host, with the card in the DEG2 — and the card did not power up: fan
+stationary until the host itself was switched on. So the DEG2 **gates card power
+behind its own logic, downstream of the PSU**. The AG02's always-on strategy
+cannot be replicated on a DEG2 at all; whether it would fix enumeration here is
+therefore untested, but it is now confirmed that the dock alone decides when the
+card powers, which is exactly the layer under suspicion. A further sweep of BIOS
+settings on the same day changed nothing — expected, after the working-unit
+report eliminated the firmware values.
+
+What remains is the real A/B: an **AG02 on this rig**, confirmed working with
+this card on an identical machine and firmware build, so nothing changes but the
+dock. That, and a live Linux boot with the card attached, are where the next
+attempt should go rather than back into the BIOS.
 
 ### What survives, and why it still matters
 
