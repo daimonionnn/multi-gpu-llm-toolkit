@@ -580,8 +580,11 @@ positions, the card stays powered continuously and the dock idles measurably
 hotter with the host off: the AG02's strategy, replicated on a DEG2. **The root
 port still never appears** — at the default link rate and with Gen3 forced, with
 the PSU pre-powered via PS_ON, under Windows and under Ubuntu. That eliminates
-power strategy on this dock entirely, and with it the last user-reachable
-variable.
+power strategy on this dock as far as one owner's testing can: the attempts were
+spread over days rather than run as a single controlled matrix, so a missed
+combination cannot be excluded. What argues against one is the community record —
+working reports exist for the AG02 and for the DEG1 (switches + Gen3), and **none
+exists anywhere for a DEG2**.
 
 The DEG1 recipe — switches + forced Gen3 + `amdgpu.runpm=0` — therefore does
 **not transfer** to the DEG2, and the plausible reason is hardware: the DEG2's
