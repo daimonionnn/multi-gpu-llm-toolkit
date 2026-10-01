@@ -573,27 +573,24 @@ card powers, which is exactly the layer under suspicion — from the PSU side. A
 further sweep of BIOS settings on the same day changed nothing, as expected after
 the working-unit report eliminated the firmware values.
 
-**The DEG2's own three hidden switches are the other path to always-on, and they
-may already have run this experiment.** Recalled from an earlier attempt, **not
-yet re-verified**: with all three switches flipped from their factory positions,
-the card appeared to stay powered continuously and the dock's idle draw rose
-noticeably with the host off — and **enumeration still failed**. If that
-recollection holds, it is precisely the test the PS_ON jumper could not run, and
-its result kills the power-strategy explanation outright: an always-powered card
-on a DEG2 still never enumerates, so what separates the AG02 would be **PERST#
-and reference-clock handling or signal conditioning**, not when the rails come
-up. Re-verification is two runs, not one: flip all three, confirm the card's fan
-runs with the host off, boot, look for the root port — **once at the default link
-speed and once with Gen3 forced in BIOS**. The DEG1 success was a *combination*
-(switches + forced Gen3 + `amdgpu.runpm=0`), not the switches alone, and on this
-rig Gen3 has only ever been tested with the switches at their factory positions.
-The combination is the closest possible replication of the one working
-Minisforum-dock report, on a dock whose signal path is busier than the DEG1's:
-the DEG2's OCuLink lanes share the board with a second, USB4/TB5 path — mux or
-routing the single-purpose DEG1 does not carry — so a link that is marginal here
-may need both the card held up *and* the slower rate. Card appears in either run:
-the switches (plus rate) are a workaround. Card absent in both: power strategy is
-eliminated and the sideband/signal layer is all that is left.
+**The DEG2's own three hidden switches are the other path to always-on — and
+that experiment has now been run, repeatedly (confirmed 2026-09-26).** With the
+main selector on OCuLink and all three switches flipped from their factory
+positions, the card stays powered continuously and the dock idles measurably
+hotter with the host off: the AG02's strategy, replicated on a DEG2. **The root
+port still never appears** — at the default link rate and with Gen3 forced, with
+the PSU pre-powered via PS_ON, under Windows and under Ubuntu. That eliminates
+power strategy on this dock entirely, and with it the last user-reachable
+variable.
+
+The DEG1 recipe — switches + forced Gen3 + `amdgpu.runpm=0` — therefore does
+**not transfer** to the DEG2, and the plausible reason is hardware: the DEG2's
+OCuLink lanes share a board with a second USB4v2/TB5 path — mux or routing the
+single-purpose DEG1 does not carry — and something in that path is evidently
+what an AMD card's link bring-up does not survive while an NVIDIA card's does.
+(The Linux kernel args in these recipes are post-enumeration stability measures;
+they cannot apply while the port is absent at the firmware level, which it is
+here under both OSes.)
 
 What remains is the real A/B: an **AG02 on this rig**, confirmed working with
 this card on an identical machine and firmware build, so nothing changes but the
