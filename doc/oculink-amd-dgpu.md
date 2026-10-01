@@ -234,8 +234,8 @@ theory alive rather than refuting it, and none of them is comfortable.
 3. **DEG1 against DEG2.** This rig uses a DEG2, the newer dock, which also
    carries a USB4/Thunderbolt path the DEG1 does not. Whether that changes how it
    routes OCuLink is untested, and it is the most interesting variable left. The
-   DIP switches are part of the same question: nothing equivalent has been located
-   on the DEG2.
+   DIP switches are part of the same question — and the DEG2 turns out to carry
+   **three hidden switches of its own** (see the sequencing section below).
 
 So "AMD dGPUs do not enumerate over OCuLink on this platform" is too strong as a
 general claim. It holds on this rig and on at least one other machine, and fails
@@ -534,9 +534,9 @@ than for a single-endpoint card — a schedule started by PERST#/REFCLK, not by 
 AOSTAR AG02 on the working unit. The DEG2's evidently does not, and the DEG1 sits
 between the two — at least one owner runs an AMD card on it, after forcing Gen3
 and moving its three DIP switches, which are precisely a sequencing configuration;
-no equivalent is documented for the DEG2. Whether the three docks differ exactly
-here is unknown, and it is the user-level explanation this page currently
-considers most likely.
+the DEG2 carries three hidden switches of its own, undocumented like the DEG1's
+(below). Whether the three docks differ exactly here is unknown, and it is the
+user-level explanation this page currently considers most likely.
 
 **What the three docks actually do is documented, and it lines up.** Each dock's
 power-on behaviour is public, and it maps onto the R9700 results exactly:
@@ -569,9 +569,23 @@ stationary until the host itself was switched on. So the DEG2 **gates card power
 behind its own logic, downstream of the PSU**. The AG02's always-on strategy
 cannot be replicated on a DEG2 at all; whether it would fix enumeration here is
 therefore untested, but it is now confirmed that the dock alone decides when the
-card powers, which is exactly the layer under suspicion. A further sweep of BIOS
-settings on the same day changed nothing — expected, after the working-unit
-report eliminated the firmware values.
+card powers, which is exactly the layer under suspicion — from the PSU side. A
+further sweep of BIOS settings on the same day changed nothing, as expected after
+the working-unit report eliminated the firmware values.
+
+**The DEG2's own three hidden switches are the other path to always-on, and they
+may already have run this experiment.** Recalled from an earlier attempt, **not
+yet re-verified**: with all three switches flipped from their factory positions,
+the card appeared to stay powered continuously and the dock's idle draw rose
+noticeably with the host off — and **enumeration still failed**. If that
+recollection holds, it is precisely the test the PS_ON jumper could not run, and
+its result kills the power-strategy explanation outright: an always-powered card
+on a DEG2 still never enumerates, so what separates the AG02 would be **PERST#
+and reference-clock handling or signal conditioning**, not when the rails come
+up. Re-verification is one run: flip all three, confirm the card's fan runs with
+the host off, boot, look for the root port. Either ending is decisive — card
+appears means the switches are a workaround; card absent means the power strategy
+is eliminated and the sideband layer is all that is left.
 
 What remains is the real A/B: an **AG02 on this rig**, confirmed working with
 this card on an identical machine and firmware build, so nothing changes but the
