@@ -208,10 +208,10 @@ Both caveats originally raised here have been withdrawn:
   therefore a clean comparison — retail card, matched topology — and both caveats
   originally raised against it have now been withdrawn.
 
-### One MS-S1 Max is reported working, and the theory does not predict it
+### A DEG1 recipe is reported working — but its host machine is never stated
 
-Another owner in that thread runs an R9700 over OCuLink on an MS-S1 Max, through
-a **DEG1** dock and the same RIITOP adapter used here. It took three things:
+A commenter in that thread got an R9700 running over OCuLink through a **DEG1**
+dock and the same RIITOP adapter used here. It took three things:
 
 - the link would not train at Gen4, so **Gen3 had to be forced in BIOS** before
   the card appeared in `lspci` at all
@@ -220,36 +220,50 @@ a **DEG1** dock and the same RIITOP adapter used here. It took three things:
 - **three DIP switches** under a panel on the underside of the DEG1, all moved
   off their factory positions
 
-This matters more than anything else on this page: the EVAL-pin theory predicts
-that no retail AMD card can work here, and one does. Three differences keep the
-theory alive rather than refuting it, and none of them is comfortable.
+**An earlier revision of this page read that as an MS-S1 Max result. It is not
+stated to be one.** The comment sits in an MS-S1 Max thread but never names the
+host, and two facts cut against assuming it:
 
-1. **The failure modes are not the same.** That machine's root port was present
-   and failing to train. Here, and for the thread's author, the root port is
-   **gone** — `00:03.1` absent from the tree entirely. A port that trains badly
-   and a port that was never published are different faults.
-2. **Gen3 does not help here.** Forced Gen3 and Gen4 were both tested on
-   `halo-win`; neither changes anything. The thread's author also tried the DEG1
-   switches, with no effect.
-3. **DEG1 against DEG2.** This rig uses a DEG2, the newer dock, which also
-   carries a USB4/Thunderbolt path the DEG1 does not. Whether that changes how it
-   routes OCuLink is untested, and it is the most interesting variable left. The
-   DIP switches are part of the same question — and the DEG2 turns out to carry
-   **three hidden switches of its own** (see the sequencing section below).
+1. **The thread's author ran that recipe on a real MS-S1 Max and it failed.**
+   Two separate DEG1 units, three adapters (RIITOP, RGEEK redriver, Minisforum
+   EOP4A), the switches flipped in several combinations, Gen3 and Gen4 both
+   forced, two Linux distributions — the root port never appeared. Their failure
+   mode also differs from the recipe author's: a port that is *present and
+   failing to train* responds to Gen3; a port that is **never published** — the
+   finding on both their machine and this one — has nothing to train.
+2. **The one commenter whose DEG1 host is known runs it on a Framework Desktop**,
+   where the R9700 *detects on boot* through the DEG1 and originally failed only
+   under load, traced to an underpowered PSU. So a DEG1 passes an R9700 fine on
+   a host that enumerates AMD cards anyway.
 
-So "AMD dGPUs do not enumerate over OCuLink on this platform" is too strong as a
-general claim. It holds on this rig and on at least one other machine, and fails
-on at least one machine with a different dock. What none of that changes is the
-argument for the default: **it should not require forcing Gen3 and moving
-undocumented DIP switches** to use a supported card on a supported port.
+What the recipe report still establishes: the DEG1's three switches change
+power behaviour, forced Gen3 can matter on marginal OCuLink paths, and
+`amdgpu.runpm=0` guards the idle-resume failure *after* enumeration. What it no
+longer establishes is any Minisforum dock working on an MS-S1 Max.
 
-One detail in that working report lines up with something measured here. That
-card could not return from idle over OCuLink — and on `halo-win` the R9700 over
-Thunderbolt draws **40–50 W doing nothing**, against **under 10 W for the whole
-dock including the GPU** when the same card and the same DEG2 run over OCuLink
-on an Intel desktop. No driver version or Windows power setting reached it. The
-same power-state machinery appears to be implicated in both, on a path where the
-GPU never enters its low-power state.
+The confirmed MS-S1 Max picture is therefore narrower and sharper:
+
+| Host | Dock | AMD card over OCuLink |
+|---|---|---|
+| MS-S1 Max | AOSTAR AG02 | **works** (one confirmed unit, Fedora) |
+| MS-S1 Max | Minisforum DEG1 | fails — thread author, 2 units, 3 adapters, switches + Gen3 tried |
+| MS-S1 Max | Minisforum DEG2 | fails — this rig, everything in this file tried |
+| Framework Desktop | Minisforum DEG1 | detects on boot (PSU-limited under load) |
+| Intel Z890 desktop | Minisforum DEG2 | works out of the box (control run above) |
+
+Neither the host alone nor the dock alone explains that table. The DEG2 works on
+a Z890; the DEG1 works on a Framework; the AG02 works on an MS-S1 Max. **What has
+no confirmed working example anywhere is the combination MS-S1 Max × Minisforum
+dock** — each side survives any other partner, and fails with the other half of
+its own vendor's bundle.
+
+One detail in the recipe report lines up with something measured here regardless
+of its host. That card could not return from idle over OCuLink — and on
+`halo-win` the R9700 over Thunderbolt draws **40–50 W doing nothing**, against
+**under 10 W for the whole dock including the GPU** when the same card and the
+same DEG2 run over OCuLink on an Intel desktop. No driver version or Windows
+power setting reached it. The same power-state machinery appears to be implicated
+in both, on a path where the GPU never enters its low-power state.
 
 ## Framework ships the same default, which breaks the theory
 
@@ -460,10 +474,11 @@ firmware:
 **The dock is now the leading suspect**, which is where the Thunderbolt half of
 this rig's troubles already pointed —
 [8 of 12 dual loads fail on that dock](benchmarks.md#the-dual-layout-is-not-stable-on-this-dock-and-the-link-rate-is-not-the-variable),
-and the DEG1 report [above](#one-ms-s1-max-is-reported-working-and-the-theory-does-not-predict-it)
-needed three undocumented workarounds on a *different* Minisforum dock. Two
-Minisforum docks, two sets of trouble, and an AOSTAR dock that simply works, is a
-pattern worth taking seriously even though it is three data points.
+and the DEG1 recipe [above](#a-deg1-recipe-is-reported-working--but-its-host-machine-is-never-stated)
+needed three undocumented workarounds on a *different* Minisforum dock — on a
+host it never names, while a confirmed MS-S1 Max failed with it. Two Minisforum
+docks without a confirmed MS-S1 Max success, and an AOSTAR dock that simply
+works, is a pattern worth taking seriously even though the sample is small.
 
 The OS difference cannot be dismissed either: everything here was measured on
 Windows, and the equivalent check needs a live Linux boot with the card attached,
@@ -531,11 +546,12 @@ point: its integrated switch (`1002:1478`/`1479`) has to come up and link-train
 before anything behind it is visible, so "present" runs on a different schedule
 than for a single-endpoint card — a schedule started by PERST#/REFCLK, not by the
 12 V rail. Some sequencer does get this right for AMD on this same firmware: the
-AOSTAR AG02 on the working unit. The DEG2's evidently does not, and the DEG1 sits
-between the two — at least one owner runs an AMD card on it, after forcing Gen3
-and moving its three DIP switches, which are precisely a sequencing configuration;
-the DEG2 carries three hidden switches of its own, undocumented like the DEG1's
-(below). Whether the three docks differ exactly here is unknown, and it is the
+AOSTAR AG02 on the working unit. Neither Minisforum dock has a confirmed MS-S1
+Max success — the DEG1 recipe that circulates (Gen3 + three DIP switches, a
+sequencing configuration) comes from a comment that never names its host, and on
+a confirmed MS-S1 Max the same recipe failed across two DEG1 units; the DEG2
+carries three hidden switches of its own, undocumented like the DEG1's (below).
+Whether the AOSTAR differs from both exactly here is unknown, and it is the
 user-level explanation this page currently considers most likely.
 
 **What the three docks actually do is documented, and it lines up.** Each dock's
@@ -545,7 +561,7 @@ power-on behaviour is public, and it maps onto the R9700 results exactly:
 |---|---|---|
 | **AOSTAR AG02** | PSU **always on** — the power button has no function, 12 V sits on the PCIe connectors permanently, and OCuLink is explicitly not hot-pluggable (cable with everything off) | **works** (the Fedora unit) |
 | **Minisforum DEG2** | "powers on automatically with the host" — card power ramps at host power-on | never enumerates (this rig) |
-| **Minisforum DEG1** | switches select ATX power behaviour; the documented symptom of a wrong position is *"the host system may boot without seeing the external card at all"* | works for at least one owner, after Gen3 + switch changes |
+| **Minisforum DEG1** | switches select ATX power behaviour; the documented symptom of a wrong position is *"the host system may boot without seeing the external card at all"* | fails on a confirmed MS-S1 Max (thread author: 2 units, 3 adapters, switches + Gen3); the one working DEG1 recipe never names its host |
 
 The working dock keeps the card **permanently powered**, so its integrated switch
 is up and stable long before the host ever polls; the failing dock races the
@@ -587,13 +603,17 @@ working reports exist for the AG02 and for the DEG1 (switches + Gen3), and **non
 exists anywhere for a DEG2**.
 
 The DEG1 recipe — switches + forced Gen3 + `amdgpu.runpm=0` — therefore does
-**not transfer** to the DEG2, and the plausible reason is hardware: the DEG2's
-OCuLink lanes share a board with a second USB4v2/TB5 path — mux or routing the
-single-purpose DEG1 does not carry — and something in that path is evidently
-what an AMD card's link bring-up does not survive while an NVIDIA card's does.
-(The Linux kernel args in these recipes are post-enumeration stability measures;
-they cannot apply while the port is absent at the firmware level, which it is
-here under both OSes.)
+**not transfer** to the DEG2. It may not even transfer to the DEG1: the recipe's
+host is unstated, and on a confirmed MS-S1 Max the thread's author ran it across
+two DEG1 units and three adapters without ever seeing the port. As the
+[table above](#a-deg1-recipe-is-reported-working--but-its-host-machine-is-never-stated)
+lays out, every part of this works somewhere — the DEG2 on a Z890, a DEG1 on a
+Framework, an AG02 on an MS-S1 Max — and the one combination with no confirmed
+success anywhere is **MS-S1 Max × Minisforum dock**. That points at an
+interaction between this firmware's enumeration behaviour and these docks'
+bring-up, rather than at either alone. (The Linux kernel args in these recipes
+are post-enumeration stability measures; they cannot apply while the port is
+absent at the firmware level, which it is here under both OSes.)
 
 What remains is the real A/B: an **AG02 on this rig**, confirmed working with
 this card on an identical machine and firmware build, so nothing changes but the
